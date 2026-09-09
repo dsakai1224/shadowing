@@ -284,6 +284,7 @@ a{color:var(--accent)}
       <button id="theme">表示切替</button>
     </div>
     <div id="probeResult" class="hint" hidden></div>
+    <div id="storageNote" class="hint"></div>
     <div class="warnbox">
       <b>課金されない確実な方法は、モデル選択ではなく Google Cloud 側の設定です。</b>
       そのプロジェクトで Cloud Billing を有効化しなければ、どのモデルを選んでも請求は発生しません。
@@ -476,10 +477,14 @@ function init(){
   if(th) document.documentElement.setAttribute("data-theme", th);
   syncCustom(); syncRanges();
   loadHealth(); applyHealthLabels();
+  // iOS はしばらく使わないサイトのデータを消すことがあるので永続化を申請する
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  showStorage();
   if(elText.value.trim()){
     loadSentences();
     restoreGloss();
     setStatus("前回の英文を復元しました。","ok");
+    refreshBadges();
   }
 }
 
@@ -776,11 +781,165 @@ async function postModelWithFallback(sel, lsKey, body){
   throw lastErr || new Error("利用できるモデルが見つかりませんでした。");
 }
 
+/* ============================================================
+   音声の永続キャッシュ（IndexedDB）
+   cache はメモリ上なので、タブやアプリを閉じると消えて作り直しになる。
+   WAV を Blob のまま IndexedDB に置けば、次回起動時も再生成が要らない。
+   localStorage は base64 化が必要で 5MB 前後の上限もあり、音声には使えない
+   （24kHz/16bit モノラルは 1 秒あたり約 48KB）。
+   ============================================================ */
+var DB_NAME="shadowing-audio", DB_STORE="audio", DB_VER=1;
+var CACHE_CAP = 120*1024*1024;   // 120MB を超えたら古い順に捨てる
+var dbp = null, putCount = 0;
+
+function openDB(){
+  if(dbp) return dbp;
+  dbp = new Promise(function(resolve){
+    try{
+      if(!("indexedDB" in window)) return resolve(null);
+      var req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = function(){
+        var db = req.result;
+        if(!db.objectStoreNames.contains(DB_STORE)){
+          var st = db.createObjectStore(DB_STORE, {keyPath:"k"});
+          st.createIndex("used", "used");
+        }
+      };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror   = function(){ resolve(null); };
+      req.onblocked = function(){ resolve(null); };
+    }catch(e){ resolve(null); }
+  });
+  return dbp;
+}
+
+function idbGet(k){
+  return openDB().then(function(db){
+    if(!db) return null;
+    return new Promise(function(res){
+      try{
+        var tx = db.transaction(DB_STORE, "readwrite"), st = tx.objectStore(DB_STORE), r = st.get(k);
+        r.onsuccess = function(){
+          var v = r.result;
+          if(v){ v.used = Date.now(); try{ st.put(v); }catch(e){} }   // LRU 用に触った時刻を更新
+          res(v || null);
+        };
+        r.onerror = function(){ res(null); };
+      }catch(e){ res(null); }
+    });
+  });
+}
+
+function idbHas(k){
+  return openDB().then(function(db){
+    if(!db) return false;
+    return new Promise(function(res){
+      try{
+        var r = db.transaction(DB_STORE,"readonly").objectStore(DB_STORE).getKey(k);
+        r.onsuccess = function(){ res(r.result !== undefined); };
+        r.onerror = function(){ res(false); };
+      }catch(e){ res(false); }
+    });
+  });
+}
+
+function idbPut(k, blob, secs){
+  return openDB().then(function(db){
+    if(!db) return;
+    return new Promise(function(res){
+      try{
+        var tx = db.transaction(DB_STORE,"readwrite");
+        tx.objectStore(DB_STORE).put({k:k, blob:blob, secs:secs, used:Date.now(), size:blob.size});
+        tx.oncomplete = function(){ res(); };
+        tx.onerror = function(){ res(); };
+        tx.onabort = function(){ res(); };   // 容量超過などで失敗しても処理は続行する
+      }catch(e){ res(); }
+    });
+  }).then(function(){
+    if((++putCount % 8) === 0) evictOld();
+  });
+}
+
+function idbStats(){
+  return openDB().then(function(db){
+    if(!db) return {n:0, bytes:0};
+    return new Promise(function(res){
+      try{
+        var n=0, bytes=0;
+        var cur = db.transaction(DB_STORE,"readonly").objectStore(DB_STORE).openCursor();
+        cur.onsuccess = function(){
+          var c = cur.result;
+          if(c){ n++; bytes += (c.value.size||0); c.continue(); }
+          else res({n:n, bytes:bytes});
+        };
+        cur.onerror = function(){ res({n:0, bytes:0}); };
+      }catch(e){ res({n:0, bytes:0}); }
+    });
+  });
+}
+
+function evictOld(){
+  return idbStats().then(function(st){
+    if(st.bytes <= CACHE_CAP) return;
+    var over = st.bytes - CACHE_CAP;
+    return openDB().then(function(db){
+      if(!db) return;
+      return new Promise(function(res){
+        try{
+          var tx = db.transaction(DB_STORE,"readwrite"), s = tx.objectStore(DB_STORE);
+          var cur = s.index("used").openCursor();   // 使っていない順
+          var freed = 0;
+          cur.onsuccess = function(){
+            var c = cur.result;
+            if(c && freed < over){ freed += (c.value.size||0); c.delete(); c.continue(); }
+            else res();
+          };
+          cur.onerror = function(){ res(); };
+        }catch(e){ res(); }
+      });
+    });
+  });
+}
+
+function idbClear(){
+  return openDB().then(function(db){
+    if(!db) return;
+    return new Promise(function(res){
+      try{
+        var tx = db.transaction(DB_STORE,"readwrite");
+        tx.objectStore(DB_STORE).clear();
+        tx.oncomplete = function(){ res(); };
+        tx.onerror = function(){ res(); };
+      }catch(e){ res(); }
+    });
+  });
+}
+
+/* メモリ → IndexedDB の順に探す。見つかればメモリ側にも載せて以後は即答にする */
+async function fromCache(ck){
+  if(cache[ck]) return cache[ck];
+  var rec = await idbGet(ck);
+  if(rec && rec.blob){
+    var entry = { url: URL.createObjectURL(rec.blob), secs: rec.secs || 0 };
+    cache[ck] = entry;
+    return entry;
+  }
+  return null;
+}
+
+/* 生成済みかどうかだけを知りたいとき（Blob は取り出さない） */
+async function hasAudio(text, styleId){
+  var ck = cacheKey(text, styleId, elVoice.value, elModel.value);
+  if(cache[ck]) return true;
+  return await idbHas(ck);
+}
+
 /* ---------- 音声生成 ---------- */
 async function synth(text, styleId){
   var voice = elVoice.value;
   var ck = cacheKey(text, styleId, voice, elModel.value);
-  if(cache[ck]) return cache[ck];
+  var hit = await fromCache(ck);        // メモリ、なければ IndexedDB
+  if(hit) return hit;
 
   var data = await postModelWithFallback(elModel, LS.model, {
     contents:[{ parts:[{ text: stylePrompt(styleId) + "\n\n" + text }] }],
@@ -809,6 +968,7 @@ async function synth(text, styleId){
   totalAudioSeconds += secs; updateCost();
   var entry = { url: URL.createObjectURL(blob), secs: secs };
   cache[ck] = entry;
+  idbPut(ck, blob, secs).then(showStorage);   // 次回起動時のために保存（完了は待たない）
   return entry;
 }
 
@@ -940,7 +1100,7 @@ async function fetchGloss(){
     var vc = 0; Object.keys(analysis).forEach(function(k){ vc += (analysis[k].vocab||[]).length; });
     rerenderGloss();
     setStatus("訳と語句を取得しました（語句 " + vc + " 件）。" + takeSwitchNote(),"ok");
-    startPrefetch();
+    refreshBadges().then(startPrefetch);
   }catch(e){
     sentences.forEach(function(s,i){ renderGloss(i, {error:e.message}); });
     setStatus(e.message,"err");
@@ -1051,20 +1211,35 @@ function sayWord(term){
    再生中は割り込まず、429/503 は間隔を空けて同じ文を再投入する。 */
 var prefetchQueue = [], prefetching = false;
 
-function startPrefetch(){
-  if(!elPrefetch.checked || !sentences.length) return;
-  prefetchQueue = sentences.map(function(s,i){ return i; });
+/* 既に生成済みの文（メモリでも IndexedDB でも）はキューに入れない。
+   同じ英文で読み込み直しても、未生成の分だけが対象になる。 */
+async function startPrefetch(){
+  if(!sentences.length) return;
+  var todo = [], skipped = 0;
+  for(var i=0;i<sentences.length;i++){
+    if(await hasAudio(sentences[i].text, elStyle.value)){ markCached(i); skipped++; }
+    else todo.push(i);
+  }
+  prefetchDone = skipped;
+  updatePrefetchBadge();
+  if(skipped && !todo.length){
+    setStatus("全 " + sentences.length + " 文の音声は保存済みです（生成は不要）。","ok");
+    return;
+  }
+  if(skipped) setStatus(skipped + " 文は保存済み。残り " + todo.length + " 文を生成します。","busy");
+  if(!elPrefetch.checked) return;
+  prefetchQueue = todo;
   runPrefetch();
 }
+
+var prefetchDone = 0;
 function updatePrefetchBadge(){
-  var done = 0;
-  sentences.forEach(function(s,i){
-    if(cache[cacheKey(s.text, elStyle.value, elVoice.value, elModel.value)]) done++;
-  });
   var el = $("prefetchNote");
-  if(el) el.textContent = (done < sentences.length && prefetching)
-    ? "音声を先読み中 " + done + "/" + sentences.length : "";
+  if(!el) return;
+  el.textContent = (prefetching && prefetchDone < sentences.length)
+    ? "音声を先読み中 " + prefetchDone + "/" + sentences.length : "";
 }
+
 async function runPrefetch(){
   if(prefetching) return;
   prefetching = true;
@@ -1074,10 +1249,10 @@ async function runPrefetch(){
     var i = prefetchQueue.shift();
     var s = sentences[i];
     if(!s) continue;
-    if(cache[cacheKey(s.text, elStyle.value, elVoice.value, elModel.value)]){ markCached(i); continue; }
+    if(await hasAudio(s.text, elStyle.value)){ markCached(i); prefetchDone++; continue; }
     try{
       await synth(s.text, elStyle.value);
-      markCached(i);
+      markCached(i); prefetchDone++;
     }catch(e){
       if(quotaKind(e) === "transient"){
         prefetchQueue.unshift(i);      // 混雑・上限は待って同じ文をやり直す
@@ -1190,16 +1365,18 @@ function renderGloss(i, d){
   }
 }
 
-/* スタイルや音声を変えるとキャッシュキーが変わるので、バッジを実態に合わせ直す */
-function refreshBadges(){
-  sentences.forEach(function(s,i){
-    if(!s.el) return;
+/* スタイルや音声を変えるとキャッシュキーが変わるので、バッジを実態に合わせ直す。
+   IndexedDB も見るため非同期。 */
+async function refreshBadges(){
+  for(var i=0;i<sentences.length;i++){
+    var s = sentences[i];
+    if(!s.el) continue;
     var b = s.el.querySelector(".badge");
-    if(!b) return;
-    var hit = !!cache[cacheKey(s.text, elStyle.value, elVoice.value, elModel.value)];
+    if(!b) continue;
+    var hit = await hasAudio(s.text, elStyle.value);
     b.textContent = hit ? "即再生" : "未生成";
     b.classList.toggle("cached", hit);
-  });
+  }
   updatePrefetchBadge();
 }
 
@@ -1273,7 +1450,7 @@ $("go").onclick = function(){
   if(!n){ setStatus("英文が入力されていません。","err"); return; }
   lsSet(LS.text, elText.value);
   setStatus(n + " 文に分割しました。","ok");
-  startPrefetch();
+  refreshBadges().then(startPrefetch);
   if(!restoreGloss() && elAuto.checked && elKey.value.trim()) fetchGloss();
 };
 $("glossBtn").onclick = function(){ fetchGloss(); };
@@ -1305,17 +1482,31 @@ $("saveKey").onclick = function(){
   setStatus("保存しました。","ok"); $("settings").open = false;
 };
 $("clearKey").onclick = function(){ lsDel(LS.key); elKey.value=""; setStatus("キーを削除しました。","ok"); };
-$("clearCache").onclick = function(){
+$("clearCache").onclick = async function(){
   Object.keys(cache).forEach(function(k){ URL.revokeObjectURL(cache[k].url); });
   cache = {}; totalAudioSeconds = 0; updateCost();
   analysis = {}; lsDel(LS.gloss);
+  await idbClear();
   sentences.forEach(function(s,i){
     var b = s.el && s.el.querySelector(".badge");
     if(b){ b.textContent="未生成"; b.classList.remove("cached"); }
     renderGloss(i, {empty:true});
   });
-  setStatus("音声と訳のキャッシュを破棄しました。","ok");
+  showStorage();
+  setStatus("保存済みの音声と訳をすべて破棄しました。","ok");
 };
+
+/* 保存済み音声の件数と容量を設定パネルに出す */
+function showStorage(){
+  var el = $("storageNote");
+  if(!el) return;
+  idbStats().then(function(st){
+    el.textContent = st.n
+      ? "保存済み音声：" + st.n + " 件 / " + (st.bytes/1048576).toFixed(1) + " MB"
+        + "（上限 " + (CACHE_CAP/1048576).toFixed(0) + "MB・超過分は古い順に自動削除）"
+      : "保存済み音声：なし";
+  });
+}
 $("theme").onclick = function(){
   var cur = document.documentElement.getAttribute("data-theme");
   var next = cur === "dark" ? "light" : "dark";
