@@ -247,29 +247,43 @@ a{color:var(--accent)}
       <div>
         <label for="model">読み上げモデル（TTS）</label>
         <select id="model">
-          <option value="gemini-3.1-flash-tts-preview">gemini-3.1-flash-tts-preview（無料枠あり）</option>
-          <option value="gemini-2.5-flash-preview-tts">gemini-2.5-flash-preview-tts（有料のみ）</option>
-          <option value="gemini-2.5-pro-preview-tts">gemini-2.5-pro-preview-tts（有料のみ）</option>
+          <option value="gemini-3.1-flash-tts-preview">gemini-3.1-flash-tts-preview</option>
+          <option value="gemini-2.5-flash-preview-tts">gemini-2.5-flash-preview-tts</option>
+          <option value="gemini-2.5-pro-preview-tts">gemini-2.5-pro-preview-tts</option>
         </select>
       </div>
       <div>
         <label for="textModel">訳・語句モデル（テキスト）</label>
         <select id="textModel">
-          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-flash-latest">gemini-flash-latest（最新版に自動追従）</option>
+          <option value="gemini-3.8-flash">gemini-3.8-flash</option>
+          <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+          <option value="gemini-pro-latest">gemini-pro-latest（最新版に自動追従）</option>
         </select>
       </div>
     </div>
+    <label class="check" for="freeFirst" style="margin-top:12px">
+      <input type="checkbox" id="freeFirst" checked>
+      無料枠で使えないモデルだった場合、自動で別のモデルに切り替える
+    </label>
     <div class="toolbar">
       <button id="refreshModels">利用可能なモデルを取得</button>
+      <button id="probeModels">どれが使えるか実測</button>
       <button class="primary" id="saveKey">保存</button>
       <button id="clearKey">キーを削除</button>
       <button id="clearCache">キャッシュ破棄</button>
       <button id="theme">表示切替</button>
     </div>
+    <div id="probeResult" class="hint" hidden></div>
+    <div class="warnbox">
+      <b>課金されない確実な方法は、モデル選択ではなく Google Cloud 側の設定です。</b>
+      そのプロジェクトで Cloud Billing を有効化しなければ、どのモデルを選んでも請求は発生しません。
+      無料枠のないモデルを呼んだ場合は、課金される代わりにエラーが返ります。
+      <br>また無料枠では入出力が Google の製品改善に利用されます。業務上の非公開情報は貼らないでください。
+    </div>
     <div class="hint">
       キーの取得：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> →「Create API key」。
+      実際のレート上限は <a href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener">AI Studio のレート制限ページ</a>で確認できます。
       <br>※ Google AI Pro の契約は AI Studio 内でのみ有効で、この API 呼び出しは別会計です。
     </div>
   </div>
@@ -328,7 +342,8 @@ var AUDIO_RATE = { "gemini-3.1-flash-tts-preview":20, "gemini-2.5-flash-preview-
 var LS = {key:"ss.apiKey", model:"ss.model", textModel:"ss.textModel", style:"ss.style",
           voice:"ss.voice", text:"ss.text", custom:"ss.custom", theme:"ss.theme",
           rate:"ss.rate", loops:"ss.loops", gap:"ss.gap", level:"ss.level",
-          auto:"ss.autoGloss", gloss:"ss.glossCache"};
+          auto:"ss.autoGloss", gloss:"ss.glossCache", freeFirst:"ss.freeFirst",
+          probe:"ss.probe"};
 
 function lsGet(k,d){ try{ var v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -338,7 +353,7 @@ var $ = function(id){ return document.getElementById(id); };
 var elText=$("text"), elStyle=$("style"), elVoice=$("voice"), elCustom=$("customStyle"),
     elCustomWrap=$("customWrap"), elList=$("list"), elKey=$("key"), elModel=$("model"),
     elTextModel=$("textModel"), elLevel=$("level"), elAuto=$("autoGloss"),
-    elRate=$("rate"), elLoops=$("loops"), elGap=$("gap"),
+    elFreeFirst=$("freeFirst"), elRate=$("rate"), elLoops=$("loops"), elGap=$("gap"),
     elStatus=$("status"), elStatusText=$("statusText"), elStop=$("stopBtn");
 
 var sentences = [], cache = {}, analysis = {}, activeIdx = -1;
@@ -433,13 +448,21 @@ function init(){
   elGap.value = lsGet(LS.gap,"0.6");
   elLevel.value = lsGet(LS.level,"700");
   elAuto.checked = lsGet(LS.auto,"1") === "1";
-  var sm = lsGet(LS.model,"");      if(sm){ addOpt(elModel, sm); elModel.value = sm; }
-  var tm = lsGet(LS.textModel,"");  if(tm){ addOpt(elTextModel, tm); elTextModel.value = tm; }
+  elFreeFirst.checked = lsGet(LS.freeFirst,"1") === "1";
+  // 提供終了が判明しているモデルが保存されていたら、既定値に戻す
+  var DEAD = /^(gemini-(2\.0|2\.5)-|gemini-1\.)/;
+  var sm = lsGet(LS.model,"");
+  if(sm && !DEAD.test(sm)){ addOpt(elModel, sm); elModel.value = sm; }
+  else if(sm){ lsDel(LS.model); }
+  var tm = lsGet(LS.textModel,"");
+  if(tm && !DEAD.test(tm)){ addOpt(elTextModel, tm); elTextModel.value = tm; }
+  else if(tm){ lsDel(LS.textModel); lsDel(LS.gloss); }
   if(lsGet(LS.key,"")){ elKey.value = lsGet(LS.key,""); setStatus("準備完了。英文を入力してください。","ok"); }
   else { $("settings").open = true; }
   var th = lsGet(LS.theme,"");
   if(th) document.documentElement.setAttribute("data-theme", th);
   syncCustom(); syncRanges();
+  try{ applyProbe(JSON.parse(lsGet(LS.probe,"[]"))); }catch(e){}
   if(elText.value.trim()){
     loadSentences();
     restoreGloss();
@@ -524,34 +547,117 @@ function apiKey(){
   return k;
 }
 function apiError(status, detail){
-  if(status===404) detail += "（モデル名が古い可能性があります。設定で「利用可能なモデルを取得」を実行してください）";
+  if(status===404) detail += "（設定で「利用可能なモデルを取得」を押すと一覧を取り直せます）";
   if(status===429) return new Error("無料枠のレート上限に達しました。少し待つか Cloud Billing を有効化してください（Google AI Pro の契約では上限は上がりません）。");
   return new Error("API エラー " + status + (detail ? ": " + detail : ""));
 }
 
-/* ---------- 音声生成 ---------- */
-async function synth(text, styleId){
-  var key = apiKey(), voice = elVoice.value, model = elModel.value;
-  var ck = cacheKey(text, styleId, voice, model);
-  if(cache[ck]) return cache[ck];
+/* モデルが廃止されたとき、Google は 404 の本文で後継モデル名を教えてくれる。
+   例: "... is no longer available to new users. Please update your code to
+        use models/gemini-3.8-flash ..."
+   その名前を拾って自動で差し替え、1度だけ再試行する。 */
+function suggestedModelFrom(msg){
+  var m = /use\s+(?:the\s+)?models\/([A-Za-z0-9._-]+)/i.exec(msg || "");
+  return m ? m[1] : null;
+}
 
-  var res = await fetch(API_BASE + "/models/" + encodeURIComponent(model) + ":generateContent", {
+async function postModel(sel, lsKey, body, allowSwitch){
+  var key = apiKey();
+  var res = await fetch(API_BASE + "/models/" + encodeURIComponent(sel.value) + ":generateContent", {
     method:"POST",
     headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
-    body: JSON.stringify({
-      contents:[{ parts:[{ text: stylePrompt(styleId) + "\n\n" + text }] }],
-      generationConfig:{
-        responseModalities:["AUDIO"],
-        speechConfig:{ voiceConfig:{ prebuiltVoiceConfig:{ voiceName: voice } } }
-      }
-    })
+    body: JSON.stringify(body)
   });
-  if(!res.ok){
-    var detail=""; try{ var j=await res.json(); detail=(j.error&&j.error.message)||""; }catch(e){}
-    if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
-    throw apiError(res.status, detail);
+  if(res.ok) return res.json();
+
+  var detail = "";
+  try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
+
+  if(res.status === 404 && allowSwitch !== false){
+    var alt = suggestedModelFrom(detail);
+    if(alt && alt !== sel.value){
+      addOpt(sel, alt); sel.value = alt; lsSet(lsKey, alt);
+      setStatus("モデルが廃止されていたため " + alt + " に切り替えて再試行します…","busy");
+      return postModel(sel, lsKey, body, false);
+    }
   }
-  var data = await res.json();
+  if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
+  var err = apiError(res.status, detail);
+  err.status = res.status;
+  err.detail = detail;
+  throw err;
+}
+
+/* 無料枠で弾かれたのか、それとも本当の障害なのかを区別する。
+   403 / 404 / 「無料枠では使えない」系は恒久的 → 別モデルへ乗り換えて記憶する。
+   429 は一時的なレート超過 → その場だけ別モデルで凌ぎ、選択は変えない。 */
+function quotaKind(e){
+  var s = e && e.status, d = (e && e.detail) || (e && e.message) || "";
+  if(s === 429) return "transient";
+  if(s === 403 || s === 404) return "permanent";
+  if(/free tier|billing|quota|not available|no longer available/i.test(d)) return "permanent";
+  return null;
+}
+function optionValues(sel){
+  return Array.prototype.map.call(sel.querySelectorAll("option"), function(o){ return o.value; });
+}
+
+/* 選択中のモデルが無料枠で使えなかった場合、一覧の上から順に試して
+   実際に通ったモデルを使う。「どれが無料か」を私が決め打ちせず、
+   その場の API の応答で決めるので、モデル世代が変わっても腐らない。 */
+var modelSwitchNote = "";
+function takeSwitchNote(){ var n = modelSwitchNote; modelSwitchNote = ""; return n ? "　" + n : ""; }
+
+async function postModelWithFallback(sel, lsKey, body){
+  var order = [sel.value];
+  optionValues(sel).forEach(function(n){ if(n !== sel.value) order.push(n); });
+  var original = sel.value, firstErr = null, lastErr = null, MAX = 4;
+
+  for(var i=0; i<order.length && i<MAX; i++){
+    if(i > 0){
+      if(!elFreeFirst.checked) break;
+      sel.value = order[i];
+      setStatus(order[i-1] + " が使えないため " + order[i] + " で再試行します…","busy");
+    }
+    try{
+      var r = await postModel(sel, lsKey, body);
+      if(i > 0){
+        // 記憶するかどうかは「元々選んでいたモデルが恒久的に駄目だったか」で決める。
+        // 途中で挟まった 429 で判断すると、選択が元に戻ってしまう。
+        if(quotaKind(firstErr) === "permanent"){
+          lsSet(lsKey, sel.value);
+          modelSwitchNote = "（" + original + " は使えないため " + sel.value + " に変更しました）";
+        }else{
+          var used = sel.value;
+          sel.value = original;                 // 一時的なレート超過なら選択は戻す
+          modelSwitchNote = "（今回は " + used + " で処理。選択は " + original + " のまま）";
+        }
+      }
+      return r;
+    }catch(e){
+      lastErr = e;
+      if(i === 0) firstErr = e;
+      if(!quotaKind(e)){ sel.value = original; throw e; }
+    }
+  }
+  sel.value = original;
+  throw lastErr || new Error("利用できるモデルが見つかりませんでした。");
+}
+
+/* ---------- 音声生成 ---------- */
+async function synth(text, styleId){
+  var voice = elVoice.value;
+  var ck = cacheKey(text, styleId, voice, elModel.value);
+  if(cache[ck]) return cache[ck];
+
+  var data = await postModelWithFallback(elModel, LS.model, {
+    contents:[{ parts:[{ text: stylePrompt(styleId) + "\n\n" + text }] }],
+    generationConfig:{
+      responseModalities:["AUDIO"],
+      speechConfig:{ voiceConfig:{ prebuiltVoiceConfig:{ voiceName: voice } } }
+    }
+  });
+  ck = cacheKey(text, styleId, voice, elModel.value); // 自動切替後のモデル名で保存する
   var parts = data && data.candidates && data.candidates[0] &&
               data.candidates[0].content && data.candidates[0].content.parts;
   var inline = null;
@@ -663,23 +769,14 @@ async function fetchGloss(){
 
   try{
     var list = sentences.map(function(s){ return s.text; });
-    var res = await fetch(API_BASE + "/models/" + encodeURIComponent(elTextModel.value) + ":generateContent", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
-      body: JSON.stringify({
-        contents:[{ parts:[{ text: glossPrompt(elLevel.value, list) }] }],
-        generationConfig:{
-          responseMimeType:"application/json",
-          responseSchema: GLOSS_SCHEMA,
-          temperature: 0.2
-        }
-      })
+    var data = await postModelWithFallback(elTextModel, LS.textModel, {
+      contents:[{ parts:[{ text: glossPrompt(elLevel.value, list) }] }],
+      generationConfig:{
+        responseMimeType:"application/json",
+        responseSchema: GLOSS_SCHEMA,
+        temperature: 0.2
+      }
     });
-    if(!res.ok){
-      var detail=""; try{ var j=await res.json(); detail=(j.error&&j.error.message)||""; }catch(e){}
-      throw apiError(res.status, detail);
-    }
-    var data = await res.json();
     var parts = data && data.candidates && data.candidates[0] &&
                 data.candidates[0].content && data.candidates[0].content.parts;
     var txt = "";
@@ -697,7 +794,7 @@ async function fetchGloss(){
     saveGloss();
 
     var vc = 0; Object.keys(analysis).forEach(function(k){ vc += (analysis[k].vocab||[]).length; });
-    setStatus("訳と語句を取得しました（語句 " + vc + " 件）。","ok");
+    setStatus("訳と語句を取得しました（語句 " + vc + " 件）。" + takeSwitchNote(),"ok");
   }catch(e){
     sentences.forEach(function(s,i){ renderGloss(i, {error:e.message}); });
     setStatus(e.message,"err");
@@ -741,7 +838,7 @@ async function playSentence(i, styleOverride, loopsOverride){
       await playUrl(entry.url);
       if(r < n-1 && !stopFlag) await sleep(Number(elGap.value)*1000);
     }
-    if(!stopFlag) setStatus("完了 (" + (i+1) + "/" + sentences.length + ")", "ok");
+    if(!stopFlag) setStatus("完了 (" + (i+1) + "/" + sentences.length + ")" + takeSwitchNote(), "ok");
   }catch(e){ setStatus(e.message, "err"); }
   finally{ setPlaying(false); }
 }
@@ -929,6 +1026,7 @@ elLevel.onchange = function(){
   }
 };
 elAuto.onchange = function(){ lsSet(LS.auto, elAuto.checked ? "1" : "0"); };
+elFreeFirst.onchange = function(){ lsSet(LS.freeFirst, elFreeFirst.checked ? "1" : "0"); };
 elRate.oninput = function(){ syncRanges(); if(audioEl) audioEl.playbackRate = Number(elRate.value); lsSet(LS.rate, elRate.value); };
 elLoops.oninput = function(){ syncRanges(); lsSet(LS.loops, elLoops.value); };
 elGap.oninput = function(){ syncRanges(); lsSet(LS.gap, elGap.value); };
@@ -960,12 +1058,26 @@ $("theme").onclick = function(){
   lsSet(LS.theme, next);
 };
 
+/* API が返す順は世代順ではないので、新しい・安定している順に並べ替えて
+   上位を「推奨」としてグループ化する。候補が30件以上あっても迷わないように。 */
+function rankModel(n){
+  var r = 0;
+  if(/-latest$/.test(n)) r += 10000;                 // 自動追従エイリアスは常に先頭
+  var m = /gemini-(\d+(?:\.\d+)?)/.exec(n);
+  if(m) r += parseFloat(m[1]) * 100;                 // 世代が新しいほど上
+  if(!/preview|exp\b|experimental/i.test(n)) r += 50; // 安定版を優先
+  if(/flash/i.test(n)) r += 20;                      // 用途的に flash 優先（安く速い）
+  if(/lite/i.test(n)) r -= 12;
+  if(/pro/i.test(n)) r -= 2;
+  return r;
+}
+
 $("refreshModels").onclick = async function(){
   var key = elKey.value.trim();
   if(!key){ setStatus("先に API キーを入力してください。","err"); return; }
   setStatus("モデル一覧を取得中…","busy");
   try{
-    var res = await fetch(API_BASE + "/models?pageSize=200", { headers:{ "x-goog-api-key":key } });
+    var res = await fetch(API_BASE + "/models?pageSize=1000", { headers:{ "x-goog-api-key":key } });
     if(!res.ok) throw new Error("取得に失敗しました (" + res.status + ")");
     var j = await res.json();
     var all = (j.models||[]).filter(function(m){
@@ -973,25 +1085,117 @@ $("refreshModels").onclick = async function(){
       return sg.indexOf("generateContent") >= 0;
     }).map(function(m){ return (m.name||"").replace(/^models\//,""); });
 
-    var tts  = all.filter(function(n){ return /tts/i.test(n); });
+    var tts = all.filter(function(n){ return /tts/i.test(n); });
     var text = all.filter(function(n){
-      return !/tts|embedding|aqa|imagen|veo|image|audio|native-audio|live/i.test(n);
+      // gemma は構造化出力の対応が弱く、customtools/画像/音声系は用途違い
+      if(/^gemma/i.test(n)) return false;
+      if(/tts|embedding|aqa|imagen|veo|image|audio|live|customtools|thinking/i.test(n)) return false;
+      return /^gemini/i.test(n);
     });
 
-    function fill(sel, names, lsk){
+    var byRank = function(a,b){ return rankModel(b) - rankModel(a); };
+    tts.sort(byRank); text.sort(byRank);
+
+    function fill(sel, names, lsk, topN){
       if(!names.length) return;
       var cur = sel.value;
       sel.innerHTML = "";
-      names.forEach(function(n){ addOpt(sel, n); });
+      var top = names.slice(0, topN), rest = names.slice(topN);
+      function group(labelText, list){
+        if(!list.length) return;
+        var g = document.createElement("optgroup"); g.label = labelText;
+        list.forEach(function(n){
+          var o = document.createElement("option"); o.value = n;
+          o.textContent = n + (/-latest$/.test(n) ? "（最新版に自動追従）" : "");
+          g.appendChild(o);
+        });
+        sel.appendChild(g);
+      }
+      group("推奨", top);
+      group("そのほか（" + rest.length + "件）", rest);
       sel.value = names.indexOf(cur) >= 0 ? cur : names[0];
       lsSet(lsk, sel.value);
     }
-    fill(elModel, tts, LS.model);
-    fill(elTextModel, text, LS.textModel);
+    fill(elModel, tts, LS.model, 3);
+    fill(elTextModel, text, LS.textModel, 4);
+    try{ applyProbe(JSON.parse(lsGet(LS.probe,"[]"))); }catch(e){}
     updateCost();
-    setStatus("TTS " + tts.length + " 件 / テキスト " + text.length + " 件を検出しました。","ok");
+    setStatus("TTS " + tts.length + " 件 / テキスト " + text.length +
+              " 件。新しい順に並べ替えました（現在：" + elTextModel.value + "）。","ok");
   }catch(e){ setStatus(e.message,"err"); }
 };
+
+/* 「どれが無料で使えるか」を私が決め打ちしても必ず陳腐化するので、
+   最小リクエスト（数トークン）を投げて実測する。テキストモデルのみ対象。
+   TTS は無料枠のリクエスト上限が極端に少ないため、ここでは消費しない。 */
+async function probeOne(name){
+  var key = apiKey();
+  var res = await fetch(API_BASE + "/models/" + encodeURIComponent(name) + ":generateContent", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
+    body: JSON.stringify({
+      contents:[{ parts:[{ text:"hi" }] }],
+      generationConfig:{ maxOutputTokens: 1, temperature: 0 }
+    })
+  });
+  if(res.ok) return { ok:true, label:"使える" };
+  var d=""; try{ var j=await res.json(); d=(j.error&&j.error.message)||""; }catch(e){}
+  if(res.status===429) return { ok:false, label:"レート上限（無料枠は在るが今は詰まっている）" };
+  if(res.status===403) return { ok:false, label:"権限なし／無料枠対象外" };
+  if(res.status===404) return { ok:false, label:"提供終了" };
+  if(/free tier|billing/i.test(d)) return { ok:false, label:"有料のみ" };
+  return { ok:false, label:"エラー " + res.status };
+}
+
+$("probeModels").onclick = async function(){
+  var box = $("probeResult");
+  try{ apiKey(); }catch(e){ setStatus(e.message,"err"); return; }
+  var names = optionValues(elTextModel).slice(0, 8);
+  if(!names.length){ setStatus("先に「利用可能なモデルを取得」を押してください。","err"); return; }
+
+  this.disabled = true;
+  box.hidden = false;
+  box.textContent = "";
+  var okList = [];
+
+  for(var i=0;i<names.length;i++){
+    setStatus("実測中 " + (i+1) + "/" + names.length + "：" + names[i],"busy");
+    var r;
+    try{ r = await probeOne(names[i]); }
+    catch(e){ r = { ok:false, label:e.message }; }
+    if(r.ok) okList.push(names[i]);
+
+    var line = document.createElement("div");
+    line.textContent = (r.ok ? "✓ " : "✗ ") + names[i] + " — " + r.label;
+    line.style.color = r.ok ? "var(--ok)" : "var(--muted)";
+    box.appendChild(line);
+  }
+
+  // 結果をドロップダウンのラベルに反映し、端末に記憶する
+  try{ lsSet(LS.probe, JSON.stringify(okList)); }catch(e){}
+  applyProbe(okList);
+
+  if(okList.length){
+    if(okList.indexOf(elTextModel.value) < 0){
+      elTextModel.value = okList[0];
+      lsSet(LS.textModel, okList[0]);
+      setStatus("使えるモデル " + okList.length + " 件。" + okList[0] + " に切り替えました。","ok");
+    }else{
+      setStatus("使えるモデル " + okList.length + " 件。現在の " + elTextModel.value + " はそのまま使えます。","ok");
+    }
+  }else{
+    setStatus("使えるテキストモデルが見つかりませんでした。キーとレート上限を確認してください。","err");
+  }
+  this.disabled = false;
+};
+
+function applyProbe(okList){
+  if(!okList || !okList.length) return;
+  Array.prototype.forEach.call(elTextModel.querySelectorAll("option"), function(o){
+    var base = o.value + (/-latest$/.test(o.value) ? "（最新版に自動追従）" : "");
+    o.textContent = (okList.indexOf(o.value) >= 0 ? "✓ " : "") + base;
+  });
+}
 
 document.addEventListener("keydown", function(e){
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
