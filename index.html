@@ -561,31 +561,49 @@ function suggestedModelFrom(msg){
   return m ? m[1] : null;
 }
 
+/* 503 / 500 / 504 はサーバー側の一時的な混雑・障害。
+   モデルを変えても意味がないので、まず同じモデルで待って再試行する。 */
+function isRetryable(status){ return status===503 || status===500 || status===504; }
+var RETRY_WAITS = [1500, 4000];   // 最大2回まで待ち直す
+
 async function postModel(sel, lsKey, body, allowSwitch){
   var key = apiKey();
-  var res = await fetch(API_BASE + "/models/" + encodeURIComponent(sel.value) + ":generateContent", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
-    body: JSON.stringify(body)
-  });
-  if(res.ok) return res.json();
+  var attempts = RETRY_WAITS.length + 1;
 
-  var detail = "";
-  try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
+  for(var a=0; a<attempts; a++){
+    var res = await fetch(API_BASE + "/models/" + encodeURIComponent(sel.value) + ":generateContent", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
+      body: JSON.stringify(body)
+    });
+    if(res.ok) return res.json();
 
-  if(res.status === 404 && allowSwitch !== false){
-    var alt = suggestedModelFrom(detail);
-    if(alt && alt !== sel.value){
-      addOpt(sel, alt); sel.value = alt; lsSet(lsKey, alt);
-      setStatus("モデルが廃止されていたため " + alt + " に切り替えて再試行します…","busy");
-      return postModel(sel, lsKey, body, false);
+    var detail = "";
+    try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
+
+    if(isRetryable(res.status) && a < attempts-1){
+      var w = RETRY_WAITS[a] + Math.floor(Math.random()*500);   // ジッタで同時再送を散らす
+      setStatus("モデルが混雑しています。" + (w/1000).toFixed(1) + " 秒待って再試行します…（" +
+                (a+2) + "/" + attempts + "）","busy");
+      await sleep(w);
+      continue;
     }
+
+    if(res.status === 404 && allowSwitch !== false){
+      var alt = suggestedModelFrom(detail);
+      if(alt && alt !== sel.value){
+        addOpt(sel, alt); sel.value = alt; lsSet(lsKey, alt);
+        setStatus("モデルが廃止されていたため " + alt + " に切り替えて再試行します…","busy");
+        return postModel(sel, lsKey, body, false);
+      }
+    }
+    if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
+    if(res.status===503) detail = "モデルが混雑しています（時間をおくと直ります）。" + detail;
+    var err = apiError(res.status, detail);
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
   }
-  if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
-  var err = apiError(res.status, detail);
-  err.status = res.status;
-  err.detail = detail;
-  throw err;
 }
 
 /* 無料枠で弾かれたのか、それとも本当の障害なのかを区別する。
@@ -594,7 +612,9 @@ async function postModel(sel, lsKey, body, allowSwitch){
 function quotaKind(e){
   var s = e && e.status, d = (e && e.detail) || (e && e.message) || "";
   if(s === 429) return "transient";
+  if(isRetryable(s)) return "transient";   // 503 等：待っても駄目なら別モデルで凌ぐ
   if(s === 403 || s === 404) return "permanent";
+  if(/high demand|overloaded|unavailable/i.test(d)) return "transient";
   if(/free tier|billing|quota|not available|no longer available/i.test(d)) return "permanent";
   return null;
 }

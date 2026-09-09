@@ -4,7 +4,7 @@
  * オフライン時のみキャッシュにフォールバックする。
  * TTS の API 呼び出しは絶対にキャッシュしない（Range/認証付きのため素通し）。
  */
-const CACHE = "shadowing-v4";
+const CACHE = "shadowing-v5";
 const SHELL = [
   "./",
   "./index.html",
