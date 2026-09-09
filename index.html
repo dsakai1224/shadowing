@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shadowing Studio — 英会話 発音・イントネーション練習</title>
-<meta name="description" content="英文を Gemini TTS で読み上げ、発音・イントネーション・意味の区切りを確認するシャドーイング練習ツール">
+<meta name="description" content="英文を Gemini TTS で読み上げ、発音・イントネーション・意味の区切りと語彙を確認するシャドーイング練習ツール">
 <meta name="theme-color" content="#17161a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png" type="image/png">
@@ -18,25 +18,23 @@
 :root{
   --bg:#faf9f7; --surface:#ffffff; --surface-2:#f2f0ec; --border:#e2ded7;
   --text:#22201d; --muted:#6f6a63; --accent:#b8552a; --accent-soft:#f6e9e1;
-  --ok:#2f6b4f; --warn:#9a6a12; --err:#a33224;
+  --ok:#2f6b4f; --warn:#9a6a12; --err:#a33224; --info:#2f5a7a; --info-soft:#e6eef4;
   --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
-  --safe-b:env(safe-area-inset-bottom,0px);
-  --safe-l:env(safe-area-inset-left,0px);
-  --safe-r:env(safe-area-inset-right,0px);
-  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px); --safe-l:env(safe-area-inset-left,0px);
+  --safe-r:env(safe-area-inset-right,0px); --safe-t:env(safe-area-inset-top,0px);
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --bg:#17161a; --surface:#212025; --surface-2:#2b2a30; --border:#3a3941;
     --text:#eceaf0; --muted:#a19daa; --accent:#e08a5c; --accent-soft:#3a2a22;
-    --ok:#7fc4a1; --warn:#dbb15e; --err:#e58b7d;
+    --ok:#7fc4a1; --warn:#dbb15e; --err:#e58b7d; --info:#8fb8d4; --info-soft:#1e2a33;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.35);
   }
 }
 :root[data-theme="dark"]{
   --bg:#17161a; --surface:#212025; --surface-2:#2b2a30; --border:#3a3941;
   --text:#eceaf0; --muted:#a19daa; --accent:#e08a5c; --accent-soft:#3a2a22;
-  --ok:#7fc4a1; --warn:#dbb15e; --err:#e58b7d;
+  --ok:#7fc4a1; --warn:#dbb15e; --err:#e58b7d; --info:#8fb8d4; --info-soft:#1e2a33;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -75,12 +73,17 @@ button:active:not(:disabled){transform:scale(.97)}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 button.icon{padding:9px 14px;font-size:14px;min-height:44px}
+button.mini{padding:2px 8px;min-height:28px;font-size:12px;border-radius:6px}
 .toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .spacer{flex:1}
 .hint{font-size:13px;color:var(--muted);margin-top:10px}
 .hint code,.kbd{background:var(--surface-2);padding:1px 6px;border-radius:4px;font-size:12.5px;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .kbd{border:1px solid var(--border);border-bottom-width:2px}
+.check{display:flex;align-items:center;gap:9px;min-height:44px;cursor:pointer;
+  font-size:14.5px;color:var(--text);text-transform:none;letter-spacing:0;font-weight:400;margin:0}
+.check input{width:20px;height:20px;accent-color:var(--accent);flex-shrink:0;margin:0}
+
 #list{margin-top:16px;display:flex;flex-direction:column;gap:9px}
 .sent{display:flex;gap:12px;align-items:flex-start;background:var(--surface);
   border:1px solid var(--border);border-left:3px solid transparent;
@@ -89,18 +92,37 @@ button.icon{padding:9px 14px;font-size:14px;min-height:44px}
 .sent .num{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;
   min-width:24px;padding-top:9px}
 .sent .body{flex:1;min-width:0}
+.sent .head{display:flex;flex-direction:column;gap:9px}
 .sent .txt{font-family:ui-serif,Georgia,"Times New Roman",serif;
   font-size:18px;line-height:1.6;word-break:break-word}
-.sent .btns{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:9px}
+.sent .btns{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 @media (min-width:680px){
-  .sent{align-items:center}
-  .sent .body{display:flex;align-items:center;gap:14px}
+  .sent .head{flex-direction:row;align-items:center;gap:14px}
   .sent .txt{flex:1}
-  .sent .btns{margin-top:0;flex-shrink:0;justify-content:flex-end}
+  .sent .btns{flex-shrink:0;justify-content:flex-end}
 }
 .badge{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--surface-2);
   color:var(--muted);border:1px solid var(--border)}
 .badge.cached{color:var(--ok);border-color:var(--ok)}
+
+/* 訳・語句 */
+.gloss{margin-top:11px;padding-top:11px;border-top:1px dashed var(--border)}
+.gloss .ja{font-size:15px;line-height:1.75;color:var(--text)}
+.gloss .ja::before{content:"訳";font-size:10.5px;font-weight:700;color:var(--info);
+  background:var(--info-soft);border-radius:4px;padding:2px 6px;margin-right:9px;
+  vertical-align:2px;letter-spacing:.06em}
+.vocab{margin-top:10px;display:flex;flex-direction:column;gap:7px}
+.v{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;font-size:14px;line-height:1.6}
+.v .term{font-weight:700;font-family:ui-serif,Georgia,serif;font-size:15.5px}
+.v .pos{font-size:11px;color:var(--muted);border:1px solid var(--border);
+  border-radius:4px;padding:1px 6px;white-space:nowrap}
+.v .ipa{font-size:13px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+.v .mean{flex:1 1 220px;min-width:0}
+.v .note{display:block;font-size:12.5px;color:var(--muted);margin-top:1px}
+.v .say{flex-shrink:0}
+.gloss .none{font-size:13px;color:var(--muted)}
+.gloss .err{font-size:13px;color:var(--err)}
+
 details{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);
   background:var(--surface);box-shadow:var(--shadow)}
 summary{cursor:pointer;padding:14px 16px;font-weight:600;font-size:15px;list-style:none;min-height:44px}
@@ -135,7 +157,7 @@ a{color:var(--accent)}
 
 <header>
   <h1>Shadowing Studio</h1>
-  <span class="sub">Gemini TTS で発音・イントネーション・区切りを確認する</span>
+  <span class="sub">Gemini で発音・イントネーション・区切り・語彙を確認する</span>
 </header>
 
 <div class="card">
@@ -155,8 +177,27 @@ a{color:var(--accent)}
     <label for="customStyle">カスタム指示（英語で書くほうが効きます）</label>
     <input type="text" id="customStyle" placeholder="Read slowly, stressing every content word:">
   </div>
+  <div class="row" style="margin-top:12px;align-items:flex-end">
+    <div>
+      <label for="level">語句解説の基準レベル</label>
+      <select id="level">
+        <option value="500">TOEIC 500 前後</option>
+        <option value="600">TOEIC 600 前後</option>
+        <option value="700" selected>TOEIC 700 前後</option>
+        <option value="800">TOEIC 800 前後</option>
+        <option value="900">TOEIC 900 前後</option>
+      </select>
+    </div>
+    <div style="flex:1 1 240px">
+      <label class="check" for="autoGloss">
+        <input type="checkbox" id="autoGloss" checked>
+        分割時に訳と語句を自動取得する
+      </label>
+    </div>
+  </div>
   <div class="toolbar">
     <button class="primary" id="go">文に分割して読み込む</button>
+    <button id="glossBtn">訳・語句を取得</button>
     <button id="playAll">通しで再生</button>
     <span class="spacer"></span>
     <span class="rangeval" id="costNote"></span>
@@ -204,18 +245,24 @@ a{color:var(--accent)}
     </div>
     <div class="row" style="margin-top:14px">
       <div>
-        <label for="model">モデル</label>
+        <label for="model">読み上げモデル（TTS）</label>
         <select id="model">
           <option value="gemini-3.1-flash-tts-preview">gemini-3.1-flash-tts-preview（無料枠あり）</option>
-          <option value="gemini-2.5-flash-preview-tts">gemini-2.5-flash-preview-tts（有料のみ・単価は半分）</option>
+          <option value="gemini-2.5-flash-preview-tts">gemini-2.5-flash-preview-tts（有料のみ）</option>
           <option value="gemini-2.5-pro-preview-tts">gemini-2.5-pro-preview-tts（有料のみ）</option>
         </select>
       </div>
-      <div style="flex:0 0 auto;display:flex;align-items:flex-end">
-        <button id="refreshModels">利用可能なモデルを取得</button>
+      <div>
+        <label for="textModel">訳・語句モデル（テキスト）</label>
+        <select id="textModel">
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+        </select>
       </div>
     </div>
     <div class="toolbar">
+      <button id="refreshModels">利用可能なモデルを取得</button>
       <button class="primary" id="saveKey">保存</button>
       <button id="clearKey">キーを削除</button>
       <button id="clearCache">キャッシュ破棄</button>
@@ -224,7 +271,6 @@ a{color:var(--accent)}
     <div class="hint">
       キーの取得：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> →「Create API key」。
       <br>※ Google AI Pro の契約は AI Studio 内でのみ有効で、この API 呼び出しは別会計です。
-      <br><span id="swVer"></span>
     </div>
   </div>
 </details>
@@ -245,9 +291,11 @@ a{color:var(--accent)}
    1. 自動再生ブロック：Safari は「ユーザー操作から直接呼ばれた play()」しか
       許可しない。await を挟んだ2回目以降の new Audio().play() は必ず失敗する。
       → Audio 要素を1つだけ作り、最初のタップで無音WAVを再生して解除。
-        以降は src を差し替えるだけなので、ループ再生も通し再生も通る。
    2. 入力欄の font-size を 16px 以上にして、フォーカス時の自動ズームを防止。
    3. Wake Lock で練習中に画面が消えないようにする。
+
+   訳・語句は TTS とは別のテキストモデルに、全文まとめて1リクエストで
+   構造化出力（responseSchema）を要求する。結果は端末に保存して再利用。
    ============================================================ */
 
 var SILENT_WAV = "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
@@ -259,7 +307,9 @@ var STYLES = [
   {id:"natural", name:"自然な会話速度",     p:"Read the following English text aloud the way a native speaker would actually say it in a relaxed conversation, with natural linking, contractions, reductions and sentence stress. Read only the text itself, do not add any commentary:"},
   {id:"british", name:"イギリス英語（RP）", p:"Read the following English text aloud naturally and clearly in a standard British (Received Pronunciation) accent. Read only the text itself, do not add any commentary:"},
   {id:"business",name:"ビジネス会議調",     p:"Read the following English text aloud in a calm, professional tone as if speaking in a business meeting, in a standard American accent, with clear articulation and confident sentence stress. Read only the text itself, do not add any commentary:"},
-  {id:"custom",  name:"カスタム指示…",      p:null}
+  {id:"custom",  name:"カスタム指示…",      p:null},
+  /* 語句の単体発音用（プルダウンには出さない） */
+  {id:"word",    name:null,                p:"Pronounce the following English expression clearly and slowly in a standard American accent. Say only the expression itself, nothing else:"}
 ];
 
 var VOICES = [
@@ -275,9 +325,10 @@ var VOICES = [
 
 var API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 var AUDIO_RATE = { "gemini-3.1-flash-tts-preview":20, "gemini-2.5-flash-preview-tts":10, "gemini-2.5-pro-preview-tts":20 };
-var LS = {key:"ss.apiKey", model:"ss.model", style:"ss.style", voice:"ss.voice",
-          text:"ss.text", custom:"ss.custom", theme:"ss.theme",
-          rate:"ss.rate", loops:"ss.loops", gap:"ss.gap"};
+var LS = {key:"ss.apiKey", model:"ss.model", textModel:"ss.textModel", style:"ss.style",
+          voice:"ss.voice", text:"ss.text", custom:"ss.custom", theme:"ss.theme",
+          rate:"ss.rate", loops:"ss.loops", gap:"ss.gap", level:"ss.level",
+          auto:"ss.autoGloss", gloss:"ss.glossCache"};
 
 function lsGet(k,d){ try{ var v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -286,19 +337,17 @@ function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
 var $ = function(id){ return document.getElementById(id); };
 var elText=$("text"), elStyle=$("style"), elVoice=$("voice"), elCustom=$("customStyle"),
     elCustomWrap=$("customWrap"), elList=$("list"), elKey=$("key"), elModel=$("model"),
+    elTextModel=$("textModel"), elLevel=$("level"), elAuto=$("autoGloss"),
     elRate=$("rate"), elLoops=$("loops"), elGap=$("gap"),
     elStatus=$("status"), elStatusText=$("statusText"), elStop=$("stopBtn");
 
-var sentences = [], cache = {}, activeIdx = -1;
-var stopFlag = false, playing = false, totalAudioSeconds = 0;
+var sentences = [], cache = {}, analysis = {}, activeIdx = -1;
+var stopFlag = false, playing = false, totalAudioSeconds = 0, glossing = false;
 
 function setStatus(msg, kind){ elStatusText.textContent = msg; elStatus.className = kind || ""; }
-function setPlaying(on){
-  playing = on; elStop.hidden = !on;
-  if(on) requestWake(); else releaseWake();
-}
+function setPlaying(on){ playing = on; elStop.hidden = !on; if(on) requestWake(); else releaseWake(); }
 
-/* ---------- 1. オーディオ解除（iOS の要） ---------- */
+/* ---------- オーディオ解除（iOS の要） ---------- */
 var audioEl = null, audioUnlocked = false;
 function ensureAudio(){
   if(!audioEl){
@@ -312,15 +361,14 @@ function ensureAudio(){
 function unlockAudio(){
   if(audioUnlocked) return;
   var a = ensureAudio();
-  a.src = SILENT_WAV;
-  a.muted = true;
+  a.src = SILENT_WAV; a.muted = true;
   var p = a.play();
-  var done = function(){ a.muted = false; audioUnlocked = true; };
-  if(p && p.then) p.then(function(){ a.pause(); a.currentTime = 0; done(); }).catch(function(){ a.muted=false; });
+  var done = function(){ a.muted=false; audioUnlocked=true; };
+  if(p && p.then) p.then(function(){ a.pause(); a.currentTime=0; done(); }).catch(function(){ a.muted=false; });
   else done();
 }
 ["touchend","mousedown","keydown"].forEach(function(ev){
-  document.addEventListener(ev, unlockAudio, {once:false, passive:true});
+  document.addEventListener(ev, unlockAudio, {passive:true});
 });
 
 function playUrl(url){
@@ -328,8 +376,7 @@ function playUrl(url){
     var a = ensureAudio();
     a.onended = null; a.onerror = null;
     try{ a.pause(); }catch(e){}
-    a.src = url;
-    a.currentTime = 0;
+    a.src = url; a.currentTime = 0;
     a.playbackRate = Number(elRate.value);
     a.preservesPitch = true; a.mozPreservesPitch = true; a.webkitPreservesPitch = true;
     a.onended = function(){ resolve(); };
@@ -351,7 +398,7 @@ function stopAll(){
   setPlaying(false);
 }
 
-/* ---------- 3. Wake Lock ---------- */
+/* ---------- Wake Lock ---------- */
 var wakeLock = null;
 async function requestWake(){
   try{
@@ -366,9 +413,12 @@ document.addEventListener("visibilitychange", function(){
   if(document.visibilityState === "visible" && playing) requestWake();
 });
 
-/* ---------- 初期化 ---------- */
-(function init(){
+/* ---------- 初期化 ----------
+   ※ この関数はスクリプト末尾で呼ぶこと。splitSentences() が参照する ABBR は
+      var 宣言なので、ここで即時実行すると undefined を触って落ちる。 */
+function init(){
   STYLES.forEach(function(s){
+    if(!s.name) return;
     var o=document.createElement("option"); o.value=s.id; o.textContent=s.name; elStyle.appendChild(o);
   });
   VOICES.forEach(function(v){
@@ -381,20 +431,25 @@ document.addEventListener("visibilitychange", function(){
   elRate.value = lsGet(LS.rate,"1");
   elLoops.value = lsGet(LS.loops,"1");
   elGap.value = lsGet(LS.gap,"0.6");
-  var savedModel = lsGet(LS.model,"");
-  if(savedModel){ addModelOption(savedModel); elModel.value = savedModel; }
+  elLevel.value = lsGet(LS.level,"700");
+  elAuto.checked = lsGet(LS.auto,"1") === "1";
+  var sm = lsGet(LS.model,"");      if(sm){ addOpt(elModel, sm); elModel.value = sm; }
+  var tm = lsGet(LS.textModel,"");  if(tm){ addOpt(elTextModel, tm); elTextModel.value = tm; }
   if(lsGet(LS.key,"")){ elKey.value = lsGet(LS.key,""); setStatus("準備完了。英文を入力してください。","ok"); }
   else { $("settings").open = true; }
   var th = lsGet(LS.theme,"");
   if(th) document.documentElement.setAttribute("data-theme", th);
   syncCustom(); syncRanges();
-  var saved = elText.value.trim();
-  if(saved){ loadSentences(); setStatus("前回の英文を復元しました。","ok"); }
-})();
+  if(elText.value.trim()){
+    loadSentences();
+    restoreGloss();
+    setStatus("前回の英文を復元しました。","ok");
+  }
+}
 
-function addModelOption(name){
-  for(var i=0;i<elModel.options.length;i++){ if(elModel.options[i].value===name) return; }
-  var o=document.createElement("option"); o.value=name; o.textContent=name; elModel.appendChild(o);
+function addOpt(sel, name){
+  for(var i=0;i<sel.options.length;i++){ if(sel.options[i].value===name) return; }
+  var o=document.createElement("option"); o.value=name; o.textContent=name; sel.appendChild(o);
 }
 function syncCustom(){ elCustomWrap.hidden = (elStyle.value!=="custom"); }
 function syncRanges(){
@@ -402,6 +457,12 @@ function syncRanges(){
   $("loopVal").textContent = elLoops.value+"回";
   $("gapVal").textContent  = Number(elGap.value).toFixed(1)+"秒";
 }
+function hash(s){
+  var h = 5381;
+  for(var i=0;i<s.length;i++){ h = (((h<<5)+h) ^ s.charCodeAt(i)) >>> 0; }
+  return h.toString(36);
+}
+function glossKey(){ return hash(elText.value.trim() + "|" + elLevel.value + "|" + elTextModel.value); }
 
 /* ---------- 文分割 ---------- */
 var ABBR = /\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e|approx|Inc|Ltd|Co|No|Fig|Vol)\.$/i;
@@ -455,47 +516,50 @@ function stylePrompt(styleId){
   return STYLES[0].p;
 }
 function cacheKey(text, styleId, voice, model){
-  return [model, voice, styleId, styleId==="custom"?elCustom.value.trim():"", text].join("");
+  return [model, voice, styleId, styleId==="custom"?elCustom.value.trim():"", text].join("");
+}
+function apiKey(){
+  var k = elKey.value.trim();
+  if(!k) throw new Error("API キーが未設定です。設定パネルで保存してください。");
+  return k;
+}
+function apiError(status, detail){
+  if(status===404) detail += "（モデル名が古い可能性があります。設定で「利用可能なモデルを取得」を実行してください）";
+  if(status===429) return new Error("無料枠のレート上限に達しました。少し待つか Cloud Billing を有効化してください（Google AI Pro の契約では上限は上がりません）。");
+  return new Error("API エラー " + status + (detail ? ": " + detail : ""));
 }
 
+/* ---------- 音声生成 ---------- */
 async function synth(text, styleId){
-  var key = elKey.value.trim();
-  if(!key) throw new Error("API キーが未設定です。設定パネルで保存してください。");
-  var voice = elVoice.value, model = elModel.value;
+  var key = apiKey(), voice = elVoice.value, model = elModel.value;
   var ck = cacheKey(text, styleId, voice, model);
   if(cache[ck]) return cache[ck];
 
   var res = await fetch(API_BASE + "/models/" + encodeURIComponent(model) + ":generateContent", {
-    method: "POST",
-    headers: { "Content-Type":"application/json", "x-goog-api-key": key },
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: stylePrompt(styleId) + "\n\n" + text }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
+      contents:[{ parts:[{ text: stylePrompt(styleId) + "\n\n" + text }] }],
+      generationConfig:{
+        responseModalities:["AUDIO"],
+        speechConfig:{ voiceConfig:{ prebuiltVoiceConfig:{ voiceName: voice } } }
       }
     })
   });
-
   if(!res.ok){
-    var detail = "";
-    try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
+    var detail=""; try{ var j=await res.json(); detail=(j.error&&j.error.message)||""; }catch(e){}
     if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
-    if(res.status===404) detail += "（モデル名が古い可能性があります。設定で「利用可能なモデルを取得」を実行してください）";
-    if(res.status===429) detail = "無料枠のレート上限に達しました。少し待つか、Cloud Billing を有効化してください（Google AI Pro の契約では上限は上がりません）。";
-    throw new Error(res.status===429 ? detail : ("API エラー " + res.status + (detail ? ": " + detail : "")));
+    throw apiError(res.status, detail);
   }
-
   var data = await res.json();
   var parts = data && data.candidates && data.candidates[0] &&
               data.candidates[0].content && data.candidates[0].content.parts;
   var inline = null;
-  if(parts) for(var i=0;i<parts.length;i++){ if(parts[i].inlineData){ inline = parts[i].inlineData; break; } }
+  if(parts) for(var i=0;i<parts.length;i++){ if(parts[i].inlineData){ inline=parts[i].inlineData; break; } }
   if(!inline){
     var fr = data && data.candidates && data.candidates[0] && data.candidates[0].finishReason;
     throw new Error("音声が返りませんでした" + (fr ? "（finishReason: "+fr+"）" : ""));
   }
-
   var meta = parsePcmMime(inline.mimeType), bytes = b64ToBytes(inline.data), blob, secs;
   if(/audio\/(l16|pcm)/i.test(inline.mimeType || "")){
     blob = pcmToWav(bytes, meta.rate, 1, meta.bits);
@@ -517,6 +581,148 @@ function updateCost(){
     ? "生成 " + totalAudioSeconds.toFixed(1) + "秒 ≈ $" + usd.toFixed(4) + "（有料枠の場合）" : "";
 }
 
+/* ---------- 訳・語句（テキストモデル・構造化出力） ---------- */
+var GLOSS_SCHEMA = {
+  type:"object",
+  properties:{
+    sentences:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          index:{type:"integer"},
+          translation:{type:"string"},
+          vocab:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                term:{type:"string"},
+                lemma:{type:"string"},
+                pos:{type:"string"},
+                ipa:{type:"string"},
+                meaning:{type:"string"},
+                note:{type:"string"}
+              },
+              required:["term","lemma","pos","ipa","meaning","note"]
+            }
+          }
+        },
+        required:["index","translation","vocab"]
+      }
+    }
+  },
+  required:["sentences"]
+};
+
+function glossPrompt(level, list){
+  var numbered = list.map(function(s,i){ return (i+1) + ". " + s; }).join("\n");
+  return [
+"You are helping a Japanese business professional study English for conversation practice.",
+"Their current level is approximately TOEIC " + level + ".",
+"",
+"For EACH numbered sentence below, produce:",
+"",
+'1. "translation" — a natural Japanese translation. Write real Japanese, not a word-for-word gloss,',
+"   but preserve the register and nuance of the original (polite business English stays polite Japanese).",
+"",
+'2. "vocab" — the words, phrasal verbs, idioms and collocations that a learner at TOEIC ' + level,
+"   would plausibly NOT know, or would misread because they are used here in a non-obvious sense.",
+"   Rules:",
+"   - Do NOT list basic vocabulary such a learner certainly knows.",
+"   - DO list phrasal verbs, idioms and fixed collocations even when every individual word is easy",
+"     (for example \"follow up on\", \"on your end\", \"in the loop\"), because the meaning is not compositional.",
+"   - DO list a common word when it carries a non-obvious meaning in this context.",
+"   - Typically 0 to 5 items per sentence. If nothing qualifies, return an empty array.",
+"   - Order items as they appear in the sentence.",
+"   Fields:",
+'   - "term": the expression exactly as it appears in the sentence',
+'   - "lemma": dictionary/base form (same as term if unchanged)',
+'   - "pos": part of speech, written in Japanese (動詞 / 名詞 / 形容詞 / 副詞 / 句動詞 / イディオム / 前置詞句 など)',
+'   - "ipa": IPA of the lemma, General American, wrapped in slashes',
+'   - "meaning": the meaning IN THIS CONTEXT, in Japanese, concise (one short phrase)',
+'   - "note": a short Japanese note on usage, nuance or register when it genuinely helps; otherwise an empty string',
+"",
+'Return exactly one entry per input sentence, with "index" matching the sentence number.',
+"",
+"Sentences:",
+numbered
+  ].join("\n");
+}
+
+async function fetchGloss(){
+  if(glossing) return;
+  if(!sentences.length){ setStatus("先に「文に分割して読み込む」を押してください。","err"); return; }
+  var key;
+  try{ key = apiKey(); }catch(e){ setStatus(e.message,"err"); return; }
+
+  glossing = true;
+  $("glossBtn").disabled = true;
+  setStatus("訳と語句を取得中…（" + sentences.length + "文をまとめて1回）","busy");
+  sentences.forEach(function(s,i){ renderGloss(i, {loading:true}); });
+
+  try{
+    var list = sentences.map(function(s){ return s.text; });
+    var res = await fetch(API_BASE + "/models/" + encodeURIComponent(elTextModel.value) + ":generateContent", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
+      body: JSON.stringify({
+        contents:[{ parts:[{ text: glossPrompt(elLevel.value, list) }] }],
+        generationConfig:{
+          responseMimeType:"application/json",
+          responseSchema: GLOSS_SCHEMA,
+          temperature: 0.2
+        }
+      })
+    });
+    if(!res.ok){
+      var detail=""; try{ var j=await res.json(); detail=(j.error&&j.error.message)||""; }catch(e){}
+      throw apiError(res.status, detail);
+    }
+    var data = await res.json();
+    var parts = data && data.candidates && data.candidates[0] &&
+                data.candidates[0].content && data.candidates[0].content.parts;
+    var txt = "";
+    if(parts) parts.forEach(function(p){ if(typeof p.text === "string") txt += p.text; });
+    if(!txt) throw new Error("応答が空でした。");
+
+    var parsed = JSON.parse(txt);
+    var arr = parsed.sentences || [];
+    analysis = {};
+    arr.forEach(function(o){
+      var i = (typeof o.index === "number" ? o.index : 0) - 1;
+      if(i >= 0 && i < sentences.length) analysis[i] = { translation:o.translation||"", vocab:o.vocab||[] };
+    });
+    sentences.forEach(function(s,i){ renderGloss(i, analysis[i] || {empty:true}); });
+    saveGloss();
+
+    var vc = 0; Object.keys(analysis).forEach(function(k){ vc += (analysis[k].vocab||[]).length; });
+    setStatus("訳と語句を取得しました（語句 " + vc + " 件）。","ok");
+  }catch(e){
+    sentences.forEach(function(s,i){ renderGloss(i, {error:e.message}); });
+    setStatus(e.message,"err");
+  }finally{
+    glossing = false;
+    $("glossBtn").disabled = false;
+  }
+}
+
+function saveGloss(){
+  try{ lsSet(LS.gloss, JSON.stringify({ k:glossKey(), a:analysis })); }catch(e){}
+}
+function restoreGloss(){
+  try{
+    var raw = lsGet(LS.gloss,"");
+    if(!raw) return false;
+    var o = JSON.parse(raw);
+    if(!o || o.k !== glossKey()) return false;
+    analysis = o.a || {};
+    sentences.forEach(function(s,i){ if(analysis[i]) renderGloss(i, analysis[i]); });
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---------- 再生 ---------- */
 function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
 async function playSentence(i, styleOverride, loopsOverride){
@@ -536,9 +742,8 @@ async function playSentence(i, styleOverride, loopsOverride){
       if(r < n-1 && !stopFlag) await sleep(Number(elGap.value)*1000);
     }
     if(!stopFlag) setStatus("完了 (" + (i+1) + "/" + sentences.length + ")", "ok");
-  }catch(e){
-    setStatus(e.message, "err");
-  }finally{ setPlaying(false); }
+  }catch(e){ setStatus(e.message, "err"); }
+  finally{ setPlaying(false); }
 }
 
 async function compareSentence(i){
@@ -559,6 +764,18 @@ async function compareSentence(i){
   finally{ setPlaying(false); }
 }
 
+async function sayWord(term){
+  stopFlag = false; setPlaying(true);
+  try{
+    setStatus("「" + term + "」を生成中…","busy");
+    var e = await synth(term, "word");
+    setStatus("「" + term + "」","busy");
+    await playUrl(e.url);
+    setStatus("完了","ok");
+  }catch(err){ setStatus(err.message,"err"); }
+  finally{ setPlaying(false); }
+}
+
 async function playAll(){
   if(!sentences.length){ setStatus("先に「文に分割して読み込む」を押してください。","err"); return; }
   stopFlag = false;
@@ -570,6 +787,7 @@ async function playAll(){
   if(!stopFlag) setStatus("全文の再生が終わりました。","ok");
 }
 
+/* ---------- 描画 ---------- */
 function setActive(i){
   activeIdx = i;
   for(var k=0;k<sentences.length;k++) sentences[k].el.classList.toggle("active", k===i);
@@ -580,12 +798,69 @@ function markCached(i){
   if(b){ b.textContent="生成済"; b.classList.add("cached"); }
 }
 
+function renderGloss(i, d){
+  var g = sentences[i] && sentences[i].gloss;
+  if(!g) return;
+  g.innerHTML = "";
+  if(!d || d.empty){ g.hidden = true; return; }
+  g.hidden = false;
+
+  if(d.loading){
+    var l=document.createElement("div"); l.className="none"; l.textContent="訳と語句を取得中…";
+    g.appendChild(l); return;
+  }
+  if(d.error){
+    var er=document.createElement("div"); er.className="err"; er.textContent="取得に失敗：" + d.error;
+    g.appendChild(er); return;
+  }
+
+  if(d.translation){
+    var ja=document.createElement("div"); ja.className="ja"; ja.textContent=d.translation;
+    g.appendChild(ja);
+  }
+  var vs = d.vocab || [];
+  if(!vs.length){
+    var nn=document.createElement("div"); nn.className="none";
+    nn.textContent="このレベルで補足が要る語句はありません。";
+    g.appendChild(nn);
+    return;
+  }
+  var box=document.createElement("div"); box.className="vocab";
+  vs.forEach(function(v){
+    var row=document.createElement("div"); row.className="v";
+
+    var t=document.createElement("span"); t.className="term"; t.textContent=v.term||v.lemma||"";
+    row.appendChild(t);
+
+    if(v.pos){ var ps=document.createElement("span"); ps.className="pos"; ps.textContent=v.pos; row.appendChild(ps); }
+    if(v.ipa){ var ip=document.createElement("span"); ip.className="ipa"; ip.textContent=v.ipa; row.appendChild(ip); }
+
+    var m=document.createElement("span"); m.className="mean";
+    m.appendChild(document.createTextNode(v.meaning||""));
+    if(v.note){
+      var nt=document.createElement("span"); nt.className="note"; nt.textContent=v.note;
+      m.appendChild(nt);
+    }
+    row.appendChild(m);
+
+    var say=document.createElement("button");
+    say.className="mini say"; say.textContent="🔊";
+    say.title = (v.lemma||v.term) + " を単体で発音";
+    say.onclick=function(){ sayWord(v.lemma || v.term); };
+    row.appendChild(say);
+
+    box.appendChild(row);
+  });
+  g.appendChild(box);
+}
+
 function render(){
   elList.innerHTML = "";
   sentences.forEach(function(s, i){
     var row=document.createElement("div"); row.className="sent";
     var num=document.createElement("div"); num.className="num"; num.textContent=(i+1);
     var body=document.createElement("div"); body.className="body";
+    var head=document.createElement("div"); head.className="head";
     var txt=document.createElement("div"); txt.className="txt"; txt.textContent=s.text;
     var bts=document.createElement("div"); bts.className="btns";
 
@@ -611,18 +886,22 @@ function render(){
     };
 
     bts.appendChild(badge); bts.appendChild(bPlay); bts.appendChild(bCmp); bts.appendChild(bDl);
-    body.appendChild(txt); body.appendChild(bts);
+    head.appendChild(txt); head.appendChild(bts);
+
+    var gloss=document.createElement("div"); gloss.className="gloss"; gloss.hidden=true;
+
+    body.appendChild(head); body.appendChild(gloss);
     row.appendChild(num); row.appendChild(body);
     elList.appendChild(row);
-    s.el = row;
+    s.el = row; s.gloss = gloss;
   });
 }
 
 function loadSentences(){
   var arr = splitSentences(elText.value);
   if(!arr.length) return 0;
-  sentences = arr.map(function(t){ return {text:t, el:null}; });
-  activeIdx = -1; render();
+  sentences = arr.map(function(t){ return {text:t, el:null, gloss:null}; });
+  activeIdx = -1; analysis = {}; render();
   return arr.length;
 }
 
@@ -631,34 +910,48 @@ $("go").onclick = function(){
   var n = loadSentences();
   if(!n){ setStatus("英文が入力されていません。","err"); return; }
   lsSet(LS.text, elText.value);
-  setStatus(n + " 文に分割しました。各文の ▶ か「比較」を押してください。","ok");
+  setStatus(n + " 文に分割しました。","ok");
+  if(!restoreGloss() && elAuto.checked && elKey.value.trim()) fetchGloss();
 };
+$("glossBtn").onclick = function(){ fetchGloss(); };
 $("playAll").onclick = function(){ playAll(); };
 elStop.onclick = function(){ stopAll(); setStatus("停止しました。",""); };
 
 elStyle.onchange = function(){ syncCustom(); lsSet(LS.style, elStyle.value); };
 elVoice.onchange = function(){ lsSet(LS.voice, elVoice.value); };
 elCustom.oninput = function(){ lsSet(LS.custom, elCustom.value); };
+elLevel.onchange = function(){
+  lsSet(LS.level, elLevel.value);
+  if(sentences.length){
+    analysis = {};
+    sentences.forEach(function(s,i){ renderGloss(i,{empty:true}); });
+    if(!restoreGloss()) setStatus("レベルを変更しました。「訳・語句を取得」で取り直せます。","ok");
+  }
+};
+elAuto.onchange = function(){ lsSet(LS.auto, elAuto.checked ? "1" : "0"); };
 elRate.oninput = function(){ syncRanges(); if(audioEl) audioEl.playbackRate = Number(elRate.value); lsSet(LS.rate, elRate.value); };
 elLoops.oninput = function(){ syncRanges(); lsSet(LS.loops, elLoops.value); };
 elGap.oninput = function(){ syncRanges(); lsSet(LS.gap, elGap.value); };
 elModel.onchange = function(){ lsSet(LS.model, elModel.value); updateCost(); };
+elTextModel.onchange = function(){ lsSet(LS.textModel, elTextModel.value); };
 
 $("saveKey").onclick = function(){
   var k = elKey.value.trim();
   if(!k){ setStatus("キーが空です。","err"); return; }
-  lsSet(LS.key, k); lsSet(LS.model, elModel.value);
+  lsSet(LS.key, k); lsSet(LS.model, elModel.value); lsSet(LS.textModel, elTextModel.value);
   setStatus("保存しました。","ok"); $("settings").open = false;
 };
 $("clearKey").onclick = function(){ lsDel(LS.key); elKey.value=""; setStatus("キーを削除しました。","ok"); };
 $("clearCache").onclick = function(){
   Object.keys(cache).forEach(function(k){ URL.revokeObjectURL(cache[k].url); });
   cache = {}; totalAudioSeconds = 0; updateCost();
-  sentences.forEach(function(s){
+  analysis = {}; lsDel(LS.gloss);
+  sentences.forEach(function(s,i){
     var b = s.el && s.el.querySelector(".badge");
     if(b){ b.textContent="未生成"; b.classList.remove("cached"); }
+    renderGloss(i, {empty:true});
   });
-  setStatus("キャッシュを破棄しました。","ok");
+  setStatus("音声と訳のキャッシュを破棄しました。","ok");
 };
 $("theme").onclick = function(){
   var cur = document.documentElement.getAttribute("data-theme");
@@ -672,18 +965,31 @@ $("refreshModels").onclick = async function(){
   if(!key){ setStatus("先に API キーを入力してください。","err"); return; }
   setStatus("モデル一覧を取得中…","busy");
   try{
-    var res = await fetch(API_BASE + "/models?pageSize=200", { headers:{ "x-goog-api-key": key } });
+    var res = await fetch(API_BASE + "/models?pageSize=200", { headers:{ "x-goog-api-key":key } });
     if(!res.ok) throw new Error("取得に失敗しました (" + res.status + ")");
     var j = await res.json();
-    var found = (j.models||[]).map(function(m){ return (m.name||"").replace(/^models\//,""); })
-                              .filter(function(n){ return /tts/i.test(n); });
-    if(!found.length){ setStatus("TTS モデルが見つかりませんでした。","err"); return; }
-    var cur = elModel.value;
-    elModel.innerHTML = "";
-    found.forEach(addModelOption);
-    elModel.value = found.indexOf(cur)>=0 ? cur : found[0];
-    lsSet(LS.model, elModel.value); updateCost();
-    setStatus(found.length + " 件検出：" + found.join(", "), "ok");
+    var all = (j.models||[]).filter(function(m){
+      var sg = m.supportedGenerationMethods || [];
+      return sg.indexOf("generateContent") >= 0;
+    }).map(function(m){ return (m.name||"").replace(/^models\//,""); });
+
+    var tts  = all.filter(function(n){ return /tts/i.test(n); });
+    var text = all.filter(function(n){
+      return !/tts|embedding|aqa|imagen|veo|image|audio|native-audio|live/i.test(n);
+    });
+
+    function fill(sel, names, lsk){
+      if(!names.length) return;
+      var cur = sel.value;
+      sel.innerHTML = "";
+      names.forEach(function(n){ addOpt(sel, n); });
+      sel.value = names.indexOf(cur) >= 0 ? cur : names[0];
+      lsSet(lsk, sel.value);
+    }
+    fill(elModel, tts, LS.model);
+    fill(elTextModel, text, LS.textModel);
+    updateCost();
+    setStatus("TTS " + tts.length + " 件 / テキスト " + text.length + " 件を検出しました。","ok");
   }catch(e){ setStatus(e.message,"err"); }
 };
 
@@ -698,7 +1004,10 @@ document.addEventListener("keydown", function(e){
     playSentence(Math.max(activeIdx-1, 0)); }
 });
 
-/* ---------- Service Worker（ホーム画面追加・オフライン起動用） ---------- */
+/* すべての宣言が済んでから初期化する */
+init();
+
+/* ---------- Service Worker ---------- */
 if("serviceWorker" in navigator){
   window.addEventListener("load", function(){
     navigator.serviceWorker.register("sw.js").then(function(reg){
