@@ -343,7 +343,7 @@ var LS = {key:"ss.apiKey", model:"ss.model", textModel:"ss.textModel", style:"ss
           voice:"ss.voice", text:"ss.text", custom:"ss.custom", theme:"ss.theme",
           rate:"ss.rate", loops:"ss.loops", gap:"ss.gap", level:"ss.level",
           auto:"ss.autoGloss", gloss:"ss.glossCache", freeFirst:"ss.freeFirst",
-          probe:"ss.probe"};
+          health:"ss.health"};
 
 function lsGet(k,d){ try{ var v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -462,7 +462,7 @@ function init(){
   var th = lsGet(LS.theme,"");
   if(th) document.documentElement.setAttribute("data-theme", th);
   syncCustom(); syncRanges();
-  try{ applyProbe(JSON.parse(lsGet(LS.probe,"[]"))); }catch(e){}
+  loadHealth(); applyHealthLabels();
   if(elText.value.trim()){
     loadSentences();
     restoreGloss();
@@ -566,9 +566,17 @@ function suggestedModelFrom(msg){
 function isRetryable(status){ return status===503 || status===500 || status===504; }
 var RETRY_WAITS = [1500, 4000];   // 最大2回まで待ち直す
 
+/* ごく最近そのモデルが落ちていたことを知っているなら、待って粘る意味は薄い。
+   リトライを省いて即フォールバックし、無駄なリクエストを使わない。 */
+function attemptsFor(model){
+  var h = health[model];
+  if(h && h.bad && (!h.ok || h.ok < h.bad) && (Date.now() - h.bad) < 15*60e3) return 1;
+  return RETRY_WAITS.length + 1;
+}
+
 async function postModel(sel, lsKey, body, allowSwitch){
   var key = apiKey();
-  var attempts = RETRY_WAITS.length + 1;
+  var attempts = attemptsFor(sel.value);
 
   for(var a=0; a<attempts; a++){
     var res = await fetch(API_BASE + "/models/" + encodeURIComponent(sel.value) + ":generateContent", {
@@ -576,7 +584,7 @@ async function postModel(sel, lsKey, body, allowSwitch){
       headers:{ "Content-Type":"application/json", "x-goog-api-key":key },
       body: JSON.stringify(body)
     });
-    if(res.ok) return res.json();
+    if(res.ok){ noteHealth(sel.value, true); return res.json(); }
 
     var detail = "";
     try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
@@ -602,6 +610,10 @@ async function postModel(sel, lsKey, body, allowSwitch){
     var err = apiError(res.status, detail);
     err.status = res.status;
     err.detail = detail;
+    // 本番の呼び出し結果を健康状態として記録する（追加リクエストは発生しない）
+    var k = (res.status===403 || res.status===404) ? "permanent"
+          : (res.status===429 || isRetryable(res.status)) ? "transient" : null;
+    if(k) noteHealth(sel.value, false, k);
     throw err;
   }
 }
@@ -622,6 +634,94 @@ function optionValues(sel){
   return Array.prototype.map.call(sel.querySelectorAll("option"), function(o){ return o.value; });
 }
 
+/* ============================================================
+   モデルの健康状態を「本番の呼び出しの結果」から学習する。
+   訳・語句や読み上げのリクエストは、そのモデルが使えるかどうかを
+   すでに教えてくれている。それを記録して次回の順序に反映すれば、
+   確認のための追加リクエストは 0 本で済む。
+   ============================================================ */
+var health = {};
+var HOUR = 3600e3;
+
+function loadHealth(){ try{ health = JSON.parse(lsGet(LS.health,"{}")) || {}; }catch(e){ health = {}; } }
+function saveHealth(){ try{ lsSet(LS.health, JSON.stringify(health)); }catch(e){} }
+
+function noteHealth(model, ok, kind){
+  if(!model) return;
+  var h = health[model] || { okN:0, badN:0 };
+  var now = Date.now();
+  if(ok){ h.ok = now; h.okN = (h.okN||0) + 1; h.kind = null; }
+  else   { h.bad = now; h.badN = (h.badN||0) + 1; h.kind = kind || "transient"; }
+  health[model] = h;
+  saveHealth();
+  applyHealthLabels();
+}
+
+function healthScore(model){
+  var h = health[model];
+  if(!h) return 0;                                  // 未知は中立
+  var now = Date.now(), s = 0;
+  if(h.ok){
+    var age = (now - h.ok) / HOUR;
+    if(age < 24) s += 60;                           // 直近に成功 → 強く優先
+    else if(age < 24*7) s += 25;
+  }
+  if(h.bad){
+    var bage = (now - h.bad) / HOUR;
+    if(h.kind === "permanent"){
+      if(bage < 24*30) s -= 500;                    // 提供終了・無料枠外は長く避ける
+    }else{
+      if(bage < 1) s -= 120;                        // 直近1時間の503/429は強く避ける
+      else if(bage < 6) s -= 40;
+      else if(bage < 24) s -= 10;
+    }
+  }
+  if(h.ok && h.bad && h.ok > h.bad) s += 30;        // 失敗より後に成功していれば回復とみなす
+  return s;
+}
+
+function healthMark(model){
+  var h = health[model];
+  if(!h || (!h.ok && !h.bad)) return "";
+  var recovered = h.ok && (!h.bad || h.ok >= h.bad);
+  if(recovered) return "✓ ";
+  if(h.kind === "permanent") return "✗ ";
+  return "△ ";
+}
+
+function healthTitle(model){
+  var h = health[model];
+  if(!h) return "まだ使ったことがありません";
+  var t = [];
+  if(h.ok)  t.push("最後に成功：" + new Date(h.ok).toLocaleString("ja-JP") + "（" + (h.okN||0) + "回）");
+  if(h.bad) t.push("最後に失敗：" + new Date(h.bad).toLocaleString("ja-JP") +
+                   "（" + (h.badN||0) + "回・" + (h.kind === "permanent" ? "恒久" : "一時的") + "）");
+  return t.join(" / ");
+}
+
+function applyHealthLabels(){
+  [elModel, elTextModel].forEach(function(sel){
+    if(!sel) return;
+    Array.prototype.forEach.call(sel.querySelectorAll("option"), function(o){
+      var base = o.value + (/-latest$/.test(o.value) ? "（最新版に自動追従）" : "");
+      o.textContent = healthMark(o.value) + base;
+      o.title = healthTitle(o.value);
+    });
+  });
+}
+
+/* 健康状態 → 世代の新しさ、の優先順で並べる。
+   「新しい＝信頼できる」ではないので、実績を先に見る。 */
+function fallbackOrder(sel){
+  var cur = sel.value;
+  var others = optionValues(sel).filter(function(n){ return n !== cur; });
+  others.sort(function(a,b){
+    var d = healthScore(b) - healthScore(a);
+    return d ? d : (rankModel(b) - rankModel(a));
+  });
+  return [cur].concat(others);   // 選択中のモデルは必ず最初に試す
+}
+
 /* 選択中のモデルが無料枠で使えなかった場合、一覧の上から順に試して
    実際に通ったモデルを使う。「どれが無料か」を私が決め打ちせず、
    その場の API の応答で決めるので、モデル世代が変わっても腐らない。 */
@@ -629,8 +729,7 @@ var modelSwitchNote = "";
 function takeSwitchNote(){ var n = modelSwitchNote; modelSwitchNote = ""; return n ? "　" + n : ""; }
 
 async function postModelWithFallback(sel, lsKey, body){
-  var order = [sel.value];
-  optionValues(sel).forEach(function(n){ if(n !== sel.value) order.push(n); });
+  var order = fallbackOrder(sel);
   var original = sel.value, firstErr = null, lastErr = null, MAX = 4;
 
   for(var i=0; i<order.length && i<MAX; i++){
@@ -1113,8 +1212,12 @@ $("refreshModels").onclick = async function(){
       return /^gemini/i.test(n);
     });
 
-    var byRank = function(a,b){ return rankModel(b) - rankModel(a); };
-    tts.sort(byRank); text.sort(byRank);
+    // 健康状態（本番の実績）→ 世代の新しさ、の順で並べる
+    var byHealthThenRank = function(a,b){
+      var d = healthScore(b) - healthScore(a);
+      return d ? d : (rankModel(b) - rankModel(a));
+    };
+    tts.sort(byHealthThenRank); text.sort(byHealthThenRank);
 
     function fill(sel, names, lsk, topN){
       if(!names.length) return;
@@ -1126,7 +1229,8 @@ $("refreshModels").onclick = async function(){
         var g = document.createElement("optgroup"); g.label = labelText;
         list.forEach(function(n){
           var o = document.createElement("option"); o.value = n;
-          o.textContent = n + (/-latest$/.test(n) ? "（最新版に自動追従）" : "");
+          o.textContent = healthMark(n) + n + (/-latest$/.test(n) ? "（最新版に自動追従）" : "");
+          o.title = healthTitle(n);
           g.appendChild(o);
         });
         sel.appendChild(g);
@@ -1138,16 +1242,20 @@ $("refreshModels").onclick = async function(){
     }
     fill(elModel, tts, LS.model, 3);
     fill(elTextModel, text, LS.textModel, 4);
-    try{ applyProbe(JSON.parse(lsGet(LS.probe,"[]"))); }catch(e){}
+    applyHealthLabels();
     updateCost();
     setStatus("TTS " + tts.length + " 件 / テキスト " + text.length +
               " 件。新しい順に並べ替えました（現在：" + elTextModel.value + "）。","ok");
   }catch(e){ setStatus(e.message,"err"); }
 };
 
-/* 「どれが無料で使えるか」を私が決め打ちしても必ず陳腐化するので、
-   最小リクエスト（数トークン）を投げて実測する。テキストモデルのみ対象。
-   TTS は無料枠のリクエスト上限が極端に少ないため、ここでは消費しない。 */
+/* 通常の運用では上の「本番結果からの学習」で足りるので、これは
+   「今すぐ全部確かめたい」ときだけ押す手動ツール。
+   レート上限はモデル単位なので別モデルへの連続送信は問題になりにくいが、
+   保険として少し間隔を空ける。対象は上位5件、テキストモデルのみ
+   （TTS は無料枠のリクエスト上限が極端に少ないので消費しない）。 */
+var PROBE_N = 5, PROBE_SPACING = 1200;
+
 async function probeOne(name){
   var key = apiKey();
   var res = await fetch(API_BASE + "/models/" + encodeURIComponent(name) + ":generateContent", {
@@ -1158,64 +1266,70 @@ async function probeOne(name){
       generationConfig:{ maxOutputTokens: 1, temperature: 0 }
     })
   });
-  if(res.ok) return { ok:true, label:"使える" };
+  if(res.ok) return { usable:true, mark:"✓", label:"使える", kind:"ok" };
   var d=""; try{ var j=await res.json(); d=(j.error&&j.error.message)||""; }catch(e){}
-  if(res.status===429) return { ok:false, label:"レート上限（無料枠は在るが今は詰まっている）" };
-  if(res.status===403) return { ok:false, label:"権限なし／無料枠対象外" };
-  if(res.status===404) return { ok:false, label:"提供終了" };
-  if(/free tier|billing/i.test(d)) return { ok:false, label:"有料のみ" };
-  return { ok:false, label:"エラー " + res.status };
+  // 429 は「アクセス権はあるが今は詰まっている」＝利用可能な証拠として扱う
+  if(res.status===429) return { usable:true, mark:"△", label:"アクセス可・今はレート上限", kind:"transient" };
+  if(res.status===503) return { usable:true, mark:"△", label:"アクセス可・今は混雑", kind:"transient" };
+  if(res.status===403) return { usable:false, mark:"✗", label:"権限なし／無料枠対象外", kind:"permanent" };
+  if(res.status===404) return { usable:false, mark:"✗", label:"提供終了", kind:"permanent" };
+  if(/free tier|billing/i.test(d)) return { usable:false, mark:"✗", label:"有料のみ", kind:"permanent" };
+  return { usable:false, mark:"✗", label:"エラー " + res.status, kind:null };
 }
 
 $("probeModels").onclick = async function(){
   var box = $("probeResult");
   try{ apiKey(); }catch(e){ setStatus(e.message,"err"); return; }
-  var names = optionValues(elTextModel).slice(0, 8);
+  var names = optionValues(elTextModel).slice(0, PROBE_N);
   if(!names.length){ setStatus("先に「利用可能なモデルを取得」を押してください。","err"); return; }
 
   this.disabled = true;
   box.hidden = false;
   box.textContent = "";
-  var okList = [];
+  var head = document.createElement("div");
+  head.textContent = "テキストモデル " + names.length + " 件を確認します（各1リクエスト・数トークン）";
+  head.style.marginBottom = "4px";
+  box.appendChild(head);
 
+  var clean = [], usable = [];
   for(var i=0;i<names.length;i++){
-    setStatus("実測中 " + (i+1) + "/" + names.length + "：" + names[i],"busy");
+    setStatus("確認中 " + (i+1) + "/" + names.length + "：" + names[i],"busy");
     var r;
     try{ r = await probeOne(names[i]); }
-    catch(e){ r = { ok:false, label:e.message }; }
-    if(r.ok) okList.push(names[i]);
+    catch(e){ r = { usable:false, mark:"✗", label:e.message, kind:null }; }
+
+    // 実測の結果も本番と同じ健康記録に反映する
+    if(r.kind === "ok") noteHealth(names[i], true);
+    else if(r.kind) noteHealth(names[i], false, r.kind);
+
+    if(r.kind === "ok") clean.push(names[i]);
+    if(r.usable) usable.push(names[i]);
 
     var line = document.createElement("div");
-    line.textContent = (r.ok ? "✓ " : "✗ ") + names[i] + " — " + r.label;
-    line.style.color = r.ok ? "var(--ok)" : "var(--muted)";
+    line.textContent = r.mark + " " + names[i] + " — " + r.label;
+    line.style.color = (r.kind === "ok") ? "var(--ok)" : (r.usable ? "var(--warn)" : "var(--muted)");
     box.appendChild(line);
+
+    if(i < names.length-1) await sleep(PROBE_SPACING);
   }
 
-  // 結果をドロップダウンのラベルに反映し、端末に記憶する
-  try{ lsSet(LS.probe, JSON.stringify(okList)); }catch(e){}
-  applyProbe(okList);
+  applyHealthLabels();
 
-  if(okList.length){
-    if(okList.indexOf(elTextModel.value) < 0){
-      elTextModel.value = okList[0];
-      lsSet(LS.textModel, okList[0]);
-      setStatus("使えるモデル " + okList.length + " 件。" + okList[0] + " に切り替えました。","ok");
+  if(clean.length){
+    if(clean.indexOf(elTextModel.value) < 0){
+      elTextModel.value = clean[0];
+      lsSet(LS.textModel, clean[0]);
+      setStatus("いま確実に使えるのは " + clean.length + " 件。" + clean[0] + " に切り替えました。","ok");
     }else{
-      setStatus("使えるモデル " + okList.length + " 件。現在の " + elTextModel.value + " はそのまま使えます。","ok");
+      setStatus("現在の " + elTextModel.value + " はそのまま使えます。","ok");
     }
+  }else if(usable.length){
+    setStatus("全て混雑・レート上限でした（アクセス権はあります）。時間をおいて試してください。","err");
   }else{
-    setStatus("使えるテキストモデルが見つかりませんでした。キーとレート上限を確認してください。","err");
+    setStatus("使えるテキストモデルが見つかりませんでした。キーを確認してください。","err");
   }
   this.disabled = false;
 };
-
-function applyProbe(okList){
-  if(!okList || !okList.length) return;
-  Array.prototype.forEach.call(elTextModel.querySelectorAll("option"), function(o){
-    var base = o.value + (/-latest$/.test(o.value) ? "（最新版に自動追従）" : "");
-    o.textContent = (okList.indexOf(o.value) >= 0 ? "✓ " : "") + base;
-  });
-}
 
 document.addEventListener("keydown", function(e){
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
