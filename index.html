@@ -2,14 +2,28 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shadowing Studio — 英会話 発音・イントネーション練習</title>
+<meta name="description" content="英文を Gemini TTS で読み上げ、発音・イントネーション・意味の区切りを確認するシャドーイング練習ツール">
+<meta name="theme-color" content="#17161a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shadowing">
+<meta name="format-detection" content="telephone=no">
 <style>
 :root{
   --bg:#faf9f7; --surface:#ffffff; --surface-2:#f2f0ec; --border:#e2ded7;
   --text:#22201d; --muted:#6f6a63; --accent:#b8552a; --accent-soft:#f6e9e1;
   --ok:#2f6b4f; --warn:#9a6a12; --err:#a33224;
-  --radius:10px; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
+  --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px);
+  --safe-r:env(safe-area-inset-right,0px);
+  --safe-t:env(safe-area-inset-top,0px);
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -25,13 +39,16 @@
   --ok:#7fc4a1; --warn:#dbb15e; --err:#e58b7d;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.35);
 }
-*{box-sizing:border-box}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Segoe UI",sans-serif;
-  font-size:15px;line-height:1.65;}
-.wrap{max-width:860px;margin:0 auto;padding:28px 20px 90px}
+  font-size:16px;line-height:1.65;overscroll-behavior-y:contain;}
+.wrap{max-width:900px;margin:0 auto;
+  padding:calc(24px + var(--safe-t)) calc(20px + var(--safe-r)) 110px calc(20px + var(--safe-l));}
+@media (min-width:1100px){ .wrap{max-width:1040px} }
 header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
-h1{font-size:20px;margin:0;letter-spacing:.01em}
+h1{font-size:21px;margin:0;letter-spacing:.01em}
 .sub{color:var(--muted);font-size:13px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
   box-shadow:var(--shadow);padding:16px;margin-top:16px}
@@ -39,59 +56,78 @@ label{display:block;font-size:12px;font-weight:600;color:var(--muted);
   letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
 textarea,input[type=text],input[type=password],select{
   width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
-  border-radius:8px;padding:10px 12px;font:inherit;}
-textarea{min-height:110px;resize:vertical;line-height:1.7}
+  border-radius:9px;padding:11px 12px;font-family:inherit;
+  font-size:16px; /* 16px 未満だと iOS がフォーカス時に自動ズームする */
+  line-height:1.5;}
+textarea{min-height:120px;resize:vertical;line-height:1.75}
+select{-webkit-appearance:none;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:36px}
 textarea:focus,input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
 .row{display:flex;gap:12px;flex-wrap:wrap}
-.row>div{flex:1 1 200px;min-width:0}
-button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--border);
-  background:var(--surface-2);color:var(--text);padding:8px 14px;transition:.12s}
+.row>div{flex:1 1 210px;min-width:0}
+button{font-family:inherit;font-size:15px;cursor:pointer;border-radius:9px;
+  border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+  padding:10px 16px;transition:.12s;touch-action:manipulation;min-height:44px}
 button:hover:not(:disabled){border-color:var(--accent)}
+button:active:not(:disabled){transform:scale(.97)}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-button.primary:hover:not(:disabled){filter:brightness(1.08)}
-button.icon{padding:6px 10px;font-size:13px}
-.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+button.icon{padding:9px 14px;font-size:14px;min-height:44px}
+.toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .spacer{flex:1}
-.hint{font-size:12.5px;color:var(--muted);margin-top:8px}
-.hint code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px}
-/* sentence list */
-#list{margin-top:16px;display:flex;flex-direction:column;gap:8px}
-.sent{display:flex;gap:10px;align-items:flex-start;background:var(--surface);
+.hint{font-size:13px;color:var(--muted);margin-top:10px}
+.hint code,.kbd{background:var(--surface-2);padding:1px 6px;border-radius:4px;font-size:12.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.kbd{border:1px solid var(--border);border-bottom-width:2px}
+#list{margin-top:16px;display:flex;flex-direction:column;gap:9px}
+.sent{display:flex;gap:12px;align-items:flex-start;background:var(--surface);
   border:1px solid var(--border);border-left:3px solid transparent;
-  border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)}
+  border-radius:var(--radius);padding:12px;box-shadow:var(--shadow)}
 .sent.active{border-left-color:var(--accent);background:var(--accent-soft)}
-.sent .num{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;
-  min-width:22px;padding-top:5px}
-.sent .txt{flex:1;min-width:0;font-family:ui-serif,Georgia,"Times New Roman",serif;
-  font-size:16px;line-height:1.6;word-break:break-word;padding-top:1px}
-.sent .btns{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
-.badge{font-size:10.5px;padding:1px 6px;border-radius:20px;background:var(--surface-2);
-  color:var(--muted);border:1px solid var(--border);align-self:center}
+.sent .num{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;
+  min-width:24px;padding-top:9px}
+.sent .body{flex:1;min-width:0}
+.sent .txt{font-family:ui-serif,Georgia,"Times New Roman",serif;
+  font-size:18px;line-height:1.6;word-break:break-word}
+.sent .btns{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:9px}
+@media (min-width:680px){
+  .sent{align-items:center}
+  .sent .body{display:flex;align-items:center;gap:14px}
+  .sent .txt{flex:1}
+  .sent .btns{margin-top:0;flex-shrink:0;justify-content:flex-end}
+}
+.badge{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--surface-2);
+  color:var(--muted);border:1px solid var(--border)}
 .badge.cached{color:var(--ok);border-color:var(--ok)}
-/* settings */
 details{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);
   background:var(--surface);box-shadow:var(--shadow)}
-summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:14px;list-style:none}
+summary{cursor:pointer;padding:14px 16px;font-weight:600;font-size:15px;list-style:none;min-height:44px}
 summary::-webkit-details-marker{display:none}
 summary::before{content:"▸ ";color:var(--muted)}
 details[open] summary::before{content:"▾ "}
 .details-body{padding:0 16px 16px}
 #status{position:fixed;left:0;right:0;bottom:0;background:var(--surface);
-  border-top:1px solid var(--border);padding:9px 20px;font-size:13px;
-  display:flex;gap:10px;align-items:center;z-index:10}
-#status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
+  border-top:1px solid var(--border);z-index:10;
+  padding:11px calc(20px + var(--safe-r)) calc(11px + var(--safe-b)) calc(20px + var(--safe-l));
+  font-size:14px;display:flex;gap:11px;align-items:center;
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#status .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex-shrink:0}
 #status.busy .dot{background:var(--warn);animation:p 1s infinite}
 #status.ok .dot{background:var(--ok)}
 #status.err .dot{background:var(--err)}
+#statusText{flex:1;min-width:0}
+#stopBtn{padding:6px 14px;min-height:36px;font-size:13px;flex-shrink:0}
 @keyframes p{50%{opacity:.25}}
-.kbd{font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);
-  border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:1px 5px}
-input[type=range]{width:100%;accent-color:var(--accent)}
-.rangeval{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
-.warnbox{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
-  padding:10px 12px;font-size:13px;margin-top:12px}
+input[type=range]{width:100%;accent-color:var(--accent);height:34px}
+.rangeval{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);
+  text-transform:none;letter-spacing:0;font-weight:400}
+.warnbox{background:var(--accent-soft);border:1px solid var(--accent);border-radius:9px;
+  padding:11px 13px;font-size:13.5px;margin-top:12px}
 a{color:var(--accent)}
+#kbdHint{display:none}
+@media (hover:hover) and (pointer:fine){ #kbdHint{display:inline} }
 </style>
 </head>
 <body>
@@ -117,7 +153,7 @@ a{color:var(--accent)}
   </div>
   <div id="customWrap" hidden style="margin-top:12px">
     <label for="customStyle">カスタム指示（英語で書くほうが効きます）</label>
-    <input type="text" id="customStyle" placeholder="Read slowly with a Scottish accent, stressing every content word:">
+    <input type="text" id="customStyle" placeholder="Read slowly, stressing every content word:">
   </div>
   <div class="toolbar">
     <button class="primary" id="go">文に分割して読み込む</button>
@@ -147,8 +183,10 @@ a{color:var(--accent)}
     </div>
   </div>
   <div class="hint">
-    再生速度はブラウザ側でピッチを保ったまま変えるので、音質を壊さずスローダウンできます。
-    キーボード：<span class="kbd">Space</span> 現在の文を再生 / <span class="kbd">J</span> 次の文 / <span class="kbd">K</span> 前の文
+    再生速度はピッチを保ったまま変速するので、音質を壊さずスローダウンできます。
+    再生中は画面が自動でスリープしないようにします。
+    <span id="kbdHint">キーボード：<span class="kbd">Space</span> 現在の文 /
+    <span class="kbd">J</span> 次 / <span class="kbd">K</span> 前 / <span class="kbd">Esc</span> 停止</span>
   </div>
 </div>
 
@@ -158,11 +196,11 @@ a{color:var(--accent)}
   <summary>設定（API キー・モデル）</summary>
   <div class="details-body">
     <label for="key">Gemini API キー</label>
-    <input type="password" id="key" placeholder="AIza..." autocomplete="off">
+    <input type="password" id="key" placeholder="AIza..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="warnbox">
-      キーはこのブラウザの <code>localStorage</code> にのみ保存され、リポジトリにもサーバーにも送られません。
-      通信先は <code>generativelanguage.googleapis.com</code> のみです。
-      共有PCでは使わず、キーには Google Cloud 側で使用量上限を設定してください。
+      キーはこの端末のブラウザ（<code>localStorage</code>）にのみ保存され、リポジトリにもサーバーにも送られません。
+      通信先は <code>generativelanguage.googleapis.com</code> だけです。
+      端末ごとに入力が必要です。共有端末では使わず、Google Cloud 側で使用量上限を設定してください。
     </div>
     <div class="row" style="margin-top:14px">
       <div>
@@ -180,32 +218,48 @@ a{color:var(--accent)}
     <div class="toolbar">
       <button class="primary" id="saveKey">保存</button>
       <button id="clearKey">キーを削除</button>
-      <button id="clearCache">音声キャッシュを破棄</button>
-      <span class="spacer"></span>
+      <button id="clearCache">キャッシュ破棄</button>
       <button id="theme">表示切替</button>
     </div>
     <div class="hint">
-      API キーの取得：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> →「Create API key」。無料枠があります。
+      キーの取得：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> →「Create API key」。
+      <br>※ Google AI Pro の契約は AI Studio 内でのみ有効で、この API 呼び出しは別会計です。
+      <br><span id="swVer"></span>
     </div>
   </div>
 </details>
 
 </div>
 
-<div id="status"><span class="dot"></span><span id="statusText">準備完了。まず設定で API キーを保存してください。</span></div>
+<div id="status">
+  <span class="dot"></span>
+  <span id="statusText">準備完了。まず設定で API キーを保存してください。</span>
+  <button id="stopBtn" hidden>停止</button>
+</div>
 
 <script>
 "use strict";
 
-/* ---------- 定数 ---------- */
+/* ============================================================
+   iPad / iOS 対応の要点
+   1. 自動再生ブロック：Safari は「ユーザー操作から直接呼ばれた play()」しか
+      許可しない。await を挟んだ2回目以降の new Audio().play() は必ず失敗する。
+      → Audio 要素を1つだけ作り、最初のタップで無音WAVを再生して解除。
+        以降は src を差し替えるだけなので、ループ再生も通し再生も通る。
+   2. 入力欄の font-size を 16px 以上にして、フォーカス時の自動ズームを防止。
+   3. Wake Lock で練習中に画面が消えないようにする。
+   ============================================================ */
+
+var SILENT_WAV = "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
 var STYLES = [
-  {id:"clear",  name:"標準（明瞭）",       p:"Read the following English text aloud naturally and clearly, in a standard American accent, at a normal pace. Read only the text itself, do not add any commentary:"},
-  {id:"slow",   name:"ゆっくり明瞭",       p:"Read the following English text aloud slowly and very clearly, in a standard American accent. Fully articulate every consonant and vowel, including word endings. Read only the text itself, do not add any commentary:"},
-  {id:"chunk",  name:"意味の区切りを強調", p:"Read the following English text aloud at a moderate pace in a standard American accent, pausing distinctly at every phrase and clause boundary so that the chunking of the sentence is obvious to a language learner. Read only the text itself, do not add any commentary:"},
-  {id:"natural",name:"自然な会話速度",     p:"Read the following English text aloud the way a native speaker would actually say it in a relaxed conversation, with natural linking, contractions, reductions and sentence stress. Read only the text itself, do not add any commentary:"},
-  {id:"british",name:"イギリス英語（RP）", p:"Read the following English text aloud naturally and clearly in a standard British (Received Pronunciation) accent. Read only the text itself, do not add any commentary:"},
-  {id:"business",name:"ビジネス会議調",    p:"Read the following English text aloud in a calm, professional tone as if speaking in a business meeting, in a standard American accent, with clear articulation and confident sentence stress. Read only the text itself, do not add any commentary:"},
-  {id:"custom", name:"カスタム指示…",      p:null}
+  {id:"clear",   name:"標準（明瞭）",       p:"Read the following English text aloud naturally and clearly, in a standard American accent, at a normal pace. Read only the text itself, do not add any commentary:"},
+  {id:"slow",    name:"ゆっくり明瞭",       p:"Read the following English text aloud slowly and very clearly, in a standard American accent. Fully articulate every consonant and vowel, including word endings. Read only the text itself, do not add any commentary:"},
+  {id:"chunk",   name:"意味の区切りを強調", p:"Read the following English text aloud at a moderate pace in a standard American accent, pausing distinctly at every phrase and clause boundary so that the chunking of the sentence is obvious to a language learner. Read only the text itself, do not add any commentary:"},
+  {id:"natural", name:"自然な会話速度",     p:"Read the following English text aloud the way a native speaker would actually say it in a relaxed conversation, with natural linking, contractions, reductions and sentence stress. Read only the text itself, do not add any commentary:"},
+  {id:"british", name:"イギリス英語（RP）", p:"Read the following English text aloud naturally and clearly in a standard British (Received Pronunciation) accent. Read only the text itself, do not add any commentary:"},
+  {id:"business",name:"ビジネス会議調",     p:"Read the following English text aloud in a calm, professional tone as if speaking in a business meeting, in a standard American accent, with clear articulation and confident sentence stress. Read only the text itself, do not add any commentary:"},
+  {id:"custom",  name:"カスタム指示…",      p:null}
 ];
 
 var VOICES = [
@@ -220,34 +274,97 @@ var VOICES = [
 ];
 
 var API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+var AUDIO_RATE = { "gemini-3.1-flash-tts-preview":20, "gemini-2.5-flash-preview-tts":10, "gemini-2.5-pro-preview-tts":20 };
 var LS = {key:"ss.apiKey", model:"ss.model", style:"ss.style", voice:"ss.voice",
-          text:"ss.text", custom:"ss.custom", theme:"ss.theme"};
+          text:"ss.text", custom:"ss.custom", theme:"ss.theme",
+          rate:"ss.rate", loops:"ss.loops", gap:"ss.gap"};
 
-/* ---------- localStorage は必ず try/catch ---------- */
 function lsGet(k,d){ try{ var v=localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
 
-/* ---------- DOM ---------- */
 var $ = function(id){ return document.getElementById(id); };
 var elText=$("text"), elStyle=$("style"), elVoice=$("voice"), elCustom=$("customStyle"),
     elCustomWrap=$("customWrap"), elList=$("list"), elKey=$("key"), elModel=$("model"),
     elRate=$("rate"), elLoops=$("loops"), elGap=$("gap"),
-    elStatus=$("status"), elStatusText=$("statusText");
+    elStatus=$("status"), elStatusText=$("statusText"), elStop=$("stopBtn");
 
-/* ---------- 状態 ---------- */
-var sentences = [];      // {text, el}
-var cache = {};          // cacheKey -> {url, bytes}
-var activeIdx = -1;
-var currentAudio = null;
-var stopFlag = false;
-var totalAudioSeconds = 0;
+var sentences = [], cache = {}, activeIdx = -1;
+var stopFlag = false, playing = false, totalAudioSeconds = 0;
 
-/* ---------- ステータス ---------- */
-function setStatus(msg, kind){
-  elStatusText.textContent = msg;
-  elStatus.className = kind || "";
+function setStatus(msg, kind){ elStatusText.textContent = msg; elStatus.className = kind || ""; }
+function setPlaying(on){
+  playing = on; elStop.hidden = !on;
+  if(on) requestWake(); else releaseWake();
 }
+
+/* ---------- 1. オーディオ解除（iOS の要） ---------- */
+var audioEl = null, audioUnlocked = false;
+function ensureAudio(){
+  if(!audioEl){
+    audioEl = new Audio();
+    audioEl.preload = "auto";
+    audioEl.setAttribute("playsinline","");
+    audioEl.playsInline = true;
+  }
+  return audioEl;
+}
+function unlockAudio(){
+  if(audioUnlocked) return;
+  var a = ensureAudio();
+  a.src = SILENT_WAV;
+  a.muted = true;
+  var p = a.play();
+  var done = function(){ a.muted = false; audioUnlocked = true; };
+  if(p && p.then) p.then(function(){ a.pause(); a.currentTime = 0; done(); }).catch(function(){ a.muted=false; });
+  else done();
+}
+["touchend","mousedown","keydown"].forEach(function(ev){
+  document.addEventListener(ev, unlockAudio, {once:false, passive:true});
+});
+
+function playUrl(url){
+  return new Promise(function(resolve, reject){
+    var a = ensureAudio();
+    a.onended = null; a.onerror = null;
+    try{ a.pause(); }catch(e){}
+    a.src = url;
+    a.currentTime = 0;
+    a.playbackRate = Number(elRate.value);
+    a.preservesPitch = true; a.mozPreservesPitch = true; a.webkitPreservesPitch = true;
+    a.onended = function(){ resolve(); };
+    a.onerror = function(){ reject(new Error("音声の読み込みに失敗しました")); };
+    var p = a.play();
+    if(p && p.catch) p.catch(function(e){
+      if(e && e.name === "NotAllowedError"){
+        audioUnlocked = false;
+        reject(new Error("再生がブロックされました。画面をタップしてからもう一度お試しください。"));
+      }else{
+        reject(new Error("再生に失敗しました: " + (e && e.message ? e.message : "")));
+      }
+    });
+  });
+}
+function stopAll(){
+  stopFlag = true;
+  if(audioEl){ try{ audioEl.pause(); }catch(e){} }
+  setPlaying(false);
+}
+
+/* ---------- 3. Wake Lock ---------- */
+var wakeLock = null;
+async function requestWake(){
+  try{
+    if("wakeLock" in navigator && !wakeLock){
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", function(){ wakeLock = null; });
+    }
+  }catch(e){}
+}
+function releaseWake(){ if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock = null; } }
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState === "visible" && playing) requestWake();
+});
 
 /* ---------- 初期化 ---------- */
 (function init(){
@@ -261,14 +378,18 @@ function setStatus(msg, kind){
   elVoice.value = lsGet(LS.voice,"Iapetus");
   elCustom.value = lsGet(LS.custom,"");
   elText.value = lsGet(LS.text,"");
+  elRate.value = lsGet(LS.rate,"1");
+  elLoops.value = lsGet(LS.loops,"1");
+  elGap.value = lsGet(LS.gap,"0.6");
   var savedModel = lsGet(LS.model,"");
   if(savedModel){ addModelOption(savedModel); elModel.value = savedModel; }
-  var savedKey = lsGet(LS.key,"");
-  if(savedKey){ elKey.value = savedKey; setStatus("API キー読み込み済み。英文を入力してください。","ok"); }
+  if(lsGet(LS.key,"")){ elKey.value = lsGet(LS.key,""); setStatus("準備完了。英文を入力してください。","ok"); }
   else { $("settings").open = true; }
   var th = lsGet(LS.theme,"");
   if(th) document.documentElement.setAttribute("data-theme", th);
   syncCustom(); syncRanges();
+  var saved = elText.value.trim();
+  if(saved){ loadSentences(); setStatus("前回の英文を復元しました。","ok"); }
 })();
 
 function addModelOption(name){
@@ -292,7 +413,7 @@ function splitSentences(raw){
     if(parts.length===1){ out.push(para); return; }
     parts.forEach(function(p){
       buf = buf ? buf+" "+p : p;
-      if(ABBR.test(buf.trim())) return;         // 略語のピリオドでは切らない
+      if(ABBR.test(buf.trim())) return;
       out.push(buf.trim()); buf="";
     });
     if(buf.trim()) out.push(buf.trim());
@@ -308,10 +429,8 @@ function b64ToBytes(b64){
 }
 function pcmToWav(pcm, sampleRate, channels, bitsPerSample){
   channels = channels || 1; bitsPerSample = bitsPerSample || 16;
-  var blockAlign = channels * bitsPerSample / 8;
-  var byteRate = sampleRate * blockAlign;
-  var buf = new ArrayBuffer(44 + pcm.length);
-  var v = new DataView(buf);
+  var blockAlign = channels * bitsPerSample / 8, byteRate = sampleRate * blockAlign;
+  var buf = new ArrayBuffer(44 + pcm.length), v = new DataView(buf);
   function str(off, s){ for(var i=0;i<s.length;i++) v.setUint8(off+i, s.charCodeAt(i)); }
   str(0,"RIFF");  v.setUint32(4, 36+pcm.length, true);
   str(8,"WAVE");  str(12,"fmt ");
@@ -330,17 +449,11 @@ function parsePcmMime(mime){
   return {rate:rate, bits:bits};
 }
 
-/* ---------- スタイル指示 ---------- */
 function stylePrompt(styleId){
-  if(styleId==="custom"){
-    var c = elCustom.value.trim();
-    return c || STYLES[0].p;
-  }
+  if(styleId==="custom"){ return elCustom.value.trim() || STYLES[0].p; }
   for(var i=0;i<STYLES.length;i++) if(STYLES[i].id===styleId) return STYLES[i].p;
   return STYLES[0].p;
 }
-
-/* ---------- 音声生成 ---------- */
 function cacheKey(text, styleId, voice, model){
   return [model, voice, styleId, styleId==="custom"?elCustom.value.trim():"", text].join("");
 }
@@ -352,27 +465,25 @@ async function synth(text, styleId){
   var ck = cacheKey(text, styleId, voice, model);
   if(cache[ck]) return cache[ck];
 
-  var body = {
-    contents: [{ parts: [{ text: stylePrompt(styleId) + "\n\n" + text }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
-    }
-  };
-
   var res = await fetch(API_BASE + "/models/" + encodeURIComponent(model) + ":generateContent", {
     method: "POST",
     headers: { "Content-Type":"application/json", "x-goog-api-key": key },
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: stylePrompt(styleId) + "\n\n" + text }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
+      }
+    })
   });
 
   if(!res.ok){
     var detail = "";
     try{ var j = await res.json(); detail = (j.error && j.error.message) || ""; }catch(e){}
-    if(res.status===400 && /voice/i.test(detail)) detail += "（音声名がこのモデルで使えない可能性があります）";
+    if(res.status===400 && /voice/i.test(detail)) detail += "（この音声名がモデルで使えない可能性があります）";
     if(res.status===404) detail += "（モデル名が古い可能性があります。設定で「利用可能なモデルを取得」を実行してください）";
-    if(res.status===429) detail += "（無料枠のレート上限です。少し待つか、Cloud Billing を有効化してください。Google AI Pro の契約では上限は上がりません）";
-    throw new Error("API エラー " + res.status + (detail ? ": " + detail : ""));
+    if(res.status===429) detail = "無料枠のレート上限に達しました。少し待つか、Cloud Billing を有効化してください（Google AI Pro の契約では上限は上がりません）。";
+    throw new Error(res.status===429 ? detail : ("API エラー " + res.status + (detail ? ": " + detail : "")));
   }
 
   var data = await res.json();
@@ -385,96 +496,67 @@ async function synth(text, styleId){
     throw new Error("音声が返りませんでした" + (fr ? "（finishReason: "+fr+"）" : ""));
   }
 
-  var meta = parsePcmMime(inline.mimeType);
-  var bytes = b64ToBytes(inline.data);
-  var blob, secs;
+  var meta = parsePcmMime(inline.mimeType), bytes = b64ToBytes(inline.data), blob, secs;
   if(/audio\/(l16|pcm)/i.test(inline.mimeType || "")){
     blob = pcmToWav(bytes, meta.rate, 1, meta.bits);
     secs = bytes.length / (meta.rate * meta.bits/8);
   }else{
     blob = new Blob([bytes], {type: inline.mimeType || "audio/wav"});
-    secs = bytes.length / 48000; // 概算
+    secs = bytes.length / 48000;
   }
-  totalAudioSeconds += secs;
-  updateCost();
-
+  totalAudioSeconds += secs; updateCost();
   var entry = { url: URL.createObjectURL(blob), secs: secs };
   cache[ck] = entry;
   return entry;
 }
 
-// Gemini TTS の音声は 25 tokens/秒 で課金される。モデル別の音声出力単価（$ / 1M audio tokens）
-var AUDIO_RATE = {
-  "gemini-3.1-flash-tts-preview": 20,
-  "gemini-2.5-flash-preview-tts": 10,
-  "gemini-2.5-pro-preview-tts":   20
-};
 function updateCost(){
   var perM = AUDIO_RATE[elModel.value] || 20;
   var usd = totalAudioSeconds * 25 / 1e6 * perM;
   $("costNote").textContent = totalAudioSeconds > 0
-    ? "生成済み " + totalAudioSeconds.toFixed(1) + "秒 ≈ $" + usd.toFixed(4) + "（有料枠の場合）"
-    : "";
+    ? "生成 " + totalAudioSeconds.toFixed(1) + "秒 ≈ $" + usd.toFixed(4) + "（有料枠の場合）" : "";
 }
 
-/* ---------- 再生 ---------- */
 function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-function playBlob(url){
-  return new Promise(function(resolve, reject){
-    var a = new Audio(url);
-    a.playbackRate = Number(elRate.value);
-    a.preservesPitch = true; a.mozPreservesPitch = true; a.webkitPreservesPitch = true;
-    currentAudio = a;
-    a.onended = function(){ currentAudio = null; resolve(); };
-    a.onerror = function(){ currentAudio = null; reject(new Error("再生に失敗しました")); };
-    a.play().catch(reject);
-  });
-}
-function stopAll(){
-  stopFlag = true;
-  if(currentAudio){ currentAudio.pause(); currentAudio = null; }
-}
-
-async function playSentence(i, styleOverride, loops){
+async function playSentence(i, styleOverride, loopsOverride){
   if(i<0 || i>=sentences.length) return;
   setActive(i);
   var styleId = styleOverride || elStyle.value;
-  var n = loops || Number(elLoops.value);
+  var n = loopsOverride || Number(elLoops.value);
+  setPlaying(true);
   try{
     setStatus("生成中… (" + (i+1) + "/" + sentences.length + ")", "busy");
     var entry = await synth(sentences[i].text, styleId);
     markCached(i);
-    setStatus("再生中 (" + (i+1) + "/" + sentences.length + ")", "busy");
     for(var r=0; r<n; r++){
       if(stopFlag) break;
-      await playBlob(entry.url);
+      setStatus("再生中 " + (i+1) + "/" + sentences.length + (n>1 ? "（" + (r+1) + "/" + n + "回目）" : ""), "busy");
+      await playUrl(entry.url);
       if(r < n-1 && !stopFlag) await sleep(Number(elGap.value)*1000);
     }
     if(!stopFlag) setStatus("完了 (" + (i+1) + "/" + sentences.length + ")", "ok");
   }catch(e){
     setStatus(e.message, "err");
-  }
+  }finally{ setPlaying(false); }
 }
 
 async function compareSentence(i){
-  setActive(i);
-  stopFlag = false;
+  setActive(i); stopFlag = false; setPlaying(true);
   try{
-    setStatus("明瞭版を生成中…","busy");
-    var slow = await synth(sentences[i].text, "slow");
-    setStatus("自然版を生成中…","busy");
-    var nat  = await synth(sentences[i].text, "natural");
+    setStatus("明瞭版を生成中…","busy");   var slow = await synth(sentences[i].text, "slow");
+    setStatus("自然版を生成中…","busy");   var nat  = await synth(sentences[i].text, "natural");
     markCached(i);
     for(var r=0; r<2 && !stopFlag; r++){
-      setStatus("① ゆっくり明瞭","busy");   await playBlob(slow.url);
+      setStatus("① ゆっくり明瞭","busy");   await playUrl(slow.url);
       if(stopFlag) break;
       await sleep(Number(elGap.value)*1000);
-      setStatus("② 自然な会話速度","busy"); await playBlob(nat.url);
+      setStatus("② 自然な会話速度","busy"); await playUrl(nat.url);
       if(r===0 && !stopFlag) await sleep(Number(elGap.value)*1000);
     }
     if(!stopFlag) setStatus("比較終了 — 消えた音・繋がった音を確認してください","ok");
   }catch(e){ setStatus(e.message,"err"); }
+  finally{ setPlaying(false); }
 }
 
 async function playAll(){
@@ -488,12 +570,9 @@ async function playAll(){
   if(!stopFlag) setStatus("全文の再生が終わりました。","ok");
 }
 
-/* ---------- リスト描画 ---------- */
 function setActive(i){
   activeIdx = i;
-  for(var k=0;k<sentences.length;k++){
-    sentences[k].el.classList.toggle("active", k===i);
-  }
+  for(var k=0;k<sentences.length;k++) sentences[k].el.classList.toggle("active", k===i);
   if(sentences[i]) sentences[i].el.scrollIntoView({block:"nearest", behavior:"smooth"});
 }
 function markCached(i){
@@ -504,67 +583,72 @@ function markCached(i){
 function render(){
   elList.innerHTML = "";
   sentences.forEach(function(s, i){
-    var row = document.createElement("div"); row.className = "sent";
-    var num = document.createElement("div"); num.className="num"; num.textContent = (i+1);
-    var txt = document.createElement("div"); txt.className="txt"; txt.textContent = s.text;
-    var bts = document.createElement("div"); bts.className="btns";
+    var row=document.createElement("div"); row.className="sent";
+    var num=document.createElement("div"); num.className="num"; num.textContent=(i+1);
+    var body=document.createElement("div"); body.className="body";
+    var txt=document.createElement("div"); txt.className="txt"; txt.textContent=s.text;
+    var bts=document.createElement("div"); bts.className="btns";
 
-    var badge = document.createElement("span"); badge.className="badge"; badge.textContent="未生成";
+    var badge=document.createElement("span"); badge.className="badge"; badge.textContent="未生成";
 
-    var bPlay = document.createElement("button"); bPlay.className="icon"; bPlay.textContent="▶ 再生";
-    bPlay.onclick = function(){ stopFlag=false; playSentence(i); };
+    var bPlay=document.createElement("button"); bPlay.className="icon"; bPlay.textContent="▶ 再生";
+    bPlay.onclick=function(){ stopFlag=false; playSentence(i); };
 
-    var bCmp = document.createElement("button"); bCmp.className="icon"; bCmp.textContent="比較";
-    bCmp.title = "「ゆっくり明瞭」と「自然な会話速度」を交互に2往復再生します";
-    bCmp.onclick = function(){ compareSentence(i); };
+    var bCmp=document.createElement("button"); bCmp.className="icon"; bCmp.textContent="比較";
+    bCmp.title="「ゆっくり明瞭」と「自然な会話速度」を交互に2往復再生";
+    bCmp.onclick=function(){ compareSentence(i); };
 
-    var bDl = document.createElement("button"); bDl.className="icon"; bDl.textContent="⤓";
-    bDl.title = "この文の音声を WAV で保存";
-    bDl.onclick = async function(){
+    var bDl=document.createElement("button"); bDl.className="icon"; bDl.textContent="⤓";
+    bDl.title="この文の音声を WAV で保存";
+    bDl.onclick=async function(){
       try{
         setStatus("生成中…","busy");
-        var e = await synth(s.text, elStyle.value);
-        markCached(i);
-        var a = document.createElement("a");
-        a.href = e.url; a.download = "sentence-" + (i+1) + ".wav";
+        var e=await synth(s.text, elStyle.value); markCached(i);
+        var a=document.createElement("a"); a.href=e.url; a.download="sentence-"+(i+1)+".wav";
         document.body.appendChild(a); a.click(); a.remove();
         setStatus("WAV を保存しました。","ok");
       }catch(err){ setStatus(err.message,"err"); }
     };
 
     bts.appendChild(badge); bts.appendChild(bPlay); bts.appendChild(bCmp); bts.appendChild(bDl);
-    row.appendChild(num); row.appendChild(txt); row.appendChild(bts);
+    body.appendChild(txt); body.appendChild(bts);
+    row.appendChild(num); row.appendChild(body);
     elList.appendChild(row);
     s.el = row;
   });
 }
 
+function loadSentences(){
+  var arr = splitSentences(elText.value);
+  if(!arr.length) return 0;
+  sentences = arr.map(function(t){ return {text:t, el:null}; });
+  activeIdx = -1; render();
+  return arr.length;
+}
+
 /* ---------- イベント ---------- */
 $("go").onclick = function(){
-  var arr = splitSentences(elText.value);
-  if(!arr.length){ setStatus("英文が入力されていません。","err"); return; }
-  sentences = arr.map(function(t){ return {text:t, el:null}; });
-  activeIdx = -1;
-  render();
+  var n = loadSentences();
+  if(!n){ setStatus("英文が入力されていません。","err"); return; }
   lsSet(LS.text, elText.value);
-  setStatus(arr.length + " 文に分割しました。各文の ▶ か「比較」を押してください。","ok");
+  setStatus(n + " 文に分割しました。各文の ▶ か「比較」を押してください。","ok");
 };
 $("playAll").onclick = function(){ playAll(); };
+elStop.onclick = function(){ stopAll(); setStatus("停止しました。",""); };
 
 elStyle.onchange = function(){ syncCustom(); lsSet(LS.style, elStyle.value); };
 elVoice.onchange = function(){ lsSet(LS.voice, elVoice.value); };
 elCustom.oninput = function(){ lsSet(LS.custom, elCustom.value); };
-elRate.oninput = function(){ syncRanges(); if(currentAudio) currentAudio.playbackRate = Number(elRate.value); };
-elLoops.oninput = syncRanges;
-elGap.oninput = syncRanges;
+elRate.oninput = function(){ syncRanges(); if(audioEl) audioEl.playbackRate = Number(elRate.value); lsSet(LS.rate, elRate.value); };
+elLoops.oninput = function(){ syncRanges(); lsSet(LS.loops, elLoops.value); };
+elGap.oninput = function(){ syncRanges(); lsSet(LS.gap, elGap.value); };
 elModel.onchange = function(){ lsSet(LS.model, elModel.value); updateCost(); };
 
 $("saveKey").onclick = function(){
   var k = elKey.value.trim();
   if(!k){ setStatus("キーが空です。","err"); return; }
   lsSet(LS.key, k); lsSet(LS.model, elModel.value);
-  setStatus("保存しました。","ok");
-  $("settings").open = false;
+  setStatus("保存しました。","ok"); $("settings").open = false;
 };
 $("clearKey").onclick = function(){ lsDel(LS.key); elKey.value=""; setStatus("キーを削除しました。","ok"); };
 $("clearCache").onclick = function(){
@@ -598,21 +682,37 @@ $("refreshModels").onclick = async function(){
     elModel.innerHTML = "";
     found.forEach(addModelOption);
     elModel.value = found.indexOf(cur)>=0 ? cur : found[0];
-    lsSet(LS.model, elModel.value);
-    setStatus(found.length + " 件の TTS モデルを検出：" + found.join(", "), "ok");
+    lsSet(LS.model, elModel.value); updateCost();
+    setStatus(found.length + " 件検出：" + found.join(", "), "ok");
   }catch(e){ setStatus(e.message,"err"); }
 };
 
 document.addEventListener("keydown", function(e){
   if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if(e.key === "Escape"){ stopAll(); setStatus("停止しました。",""); return; }
   if(!sentences.length) return;
   if(e.code === "Space"){ e.preventDefault(); stopFlag=false; playSentence(activeIdx<0?0:activeIdx); }
   else if(e.key === "j" || e.key === "J"){ e.preventDefault(); stopAll(); stopFlag=false;
     playSentence(Math.min(activeIdx+1, sentences.length-1)); }
   else if(e.key === "k" || e.key === "K"){ e.preventDefault(); stopAll(); stopFlag=false;
     playSentence(Math.max(activeIdx-1, 0)); }
-  else if(e.key === "Escape"){ stopAll(); setStatus("停止しました。",""); }
 });
+
+/* ---------- Service Worker（ホーム画面追加・オフライン起動用） ---------- */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", function(){
+    navigator.serviceWorker.register("sw.js").then(function(reg){
+      reg.addEventListener("updatefound", function(){
+        var nw = reg.installing;
+        if(nw) nw.addEventListener("statechange", function(){
+          if(nw.state === "installed" && navigator.serviceWorker.controller){
+            setStatus("新しいバージョンがあります。再読み込みしてください。","ok");
+          }
+        });
+      });
+    }).catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
